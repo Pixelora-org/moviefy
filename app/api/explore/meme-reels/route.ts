@@ -161,11 +161,12 @@ async function identifyAndResolveMovie(
  */
 async function identifyReelsSequential(
   reels: SampleReelData[],
+  hasGeminiKey: boolean,
 ): Promise<{ items: MemeReelApiItem[]; rateLimited: boolean }> {
   const items: MemeReelApiItem[] = [];
   let rateLimited = false;
   let geminiCallsUsed = 0;
-  const MAX_GEMINI_CALLS = 2;
+  const MAX_GEMINI_CALLS = hasGeminiKey ? 2 : 0;
 
   for (const reel of reels) {
     const useGemini = geminiCallsUsed < MAX_GEMINI_CALLS;
@@ -197,19 +198,20 @@ async function identifyReelsSequential(
 
 /**
  * Cached function that performs the actual identification work.
- * Only called when both TMDB and Gemini keys are configured.
- * Uses heuristic extraction first, then sequential Gemini calls (capped at 2).
+ * Uses heuristic extraction first, then sequential Gemini calls (capped at 2, or 0 if no key).
  * Cache key bumped to v5 after adding heuristic-first approach to reduce Gemini quota usage.
  */
-const identifyReelsCached = unstable_cache(
-  async (): Promise<{ items: MemeReelApiItem[]; rateLimited: boolean }> => {
-    return await identifyReelsSequential(SAMPLE_REELS);
-  },
-  ["explore-meme-reels-v5"],
-  { revalidate: 3600 },
-);
+const identifyReelsCached = (hasGeminiKey: boolean) =>
+  unstable_cache(
+    async (): Promise<{ items: MemeReelApiItem[]; rateLimited: boolean }> => {
+      return await identifyReelsSequential(SAMPLE_REELS, hasGeminiKey);
+    },
+    [`explore-meme-reels-v5-gemini-${hasGeminiKey}`],
+    { revalidate: 3600 },
+  );
 
 export async function GET() {
+  const hasGemini = Boolean(process.env.GEMINI_API_KEY?.trim());
   const configured = {
     tmdb: Boolean(process.env.TMDB_API_KEY?.trim()),
     youtube: Boolean(
@@ -217,11 +219,10 @@ export async function GET() {
         process.env.YOUTUBE_DATA_API_KEY?.trim() ||
         process.env.GOOGLE_API_KEY?.trim(),
     ),
+    gemini: hasGemini,
   };
 
-  const hasGemini = Boolean(process.env.GEMINI_API_KEY?.trim());
-
-  // Return early for unconfigured cases without caching
+  // Return early only if TMDB is missing (required for heuristic path)
   if (!configured.tmdb) {
     return NextResponse.json({
       configured,
@@ -230,21 +231,12 @@ export async function GET() {
     } satisfies MemeReelsApiResponse);
   }
 
-  if (!hasGemini) {
-    return NextResponse.json({
-      configured,
-      items: [],
-      warning:
-        "Set GEMINI_API_KEY to enable AI-powered movie identification for meme reels.",
-    } satisfies MemeReelsApiResponse);
-  }
-
-  // Only cache when fully configured
-  const result = await identifyReelsCached();
+  // Run identification with or without Gemini (heuristics work without it)
+  const result = await identifyReelsCached(hasGemini)();
 
   // Don't cache empty results - retry fresh to avoid sticky failures
   if (result.items.length === 0) {
-    const freshResult = await identifyReelsSequential(SAMPLE_REELS);
+    const freshResult = await identifyReelsSequential(SAMPLE_REELS, hasGemini);
     if (freshResult.items.length > 0) {
       // Fresh call succeeded; return it (next request will cache it)
       return NextResponse.json({
