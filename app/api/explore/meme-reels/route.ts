@@ -67,10 +67,65 @@ type IdentifyResult = {
   rateLimited?: boolean;
 };
 
+/**
+ * Known movie franchises and titles to extract from video titles heuristically.
+ * Covers the sample reels to avoid Gemini API calls for obvious cases.
+ */
+const KNOWN_MOVIES = [
+  { patterns: ["interstellar"], title: "Interstellar", year: 2014 },
+  { patterns: ["dark knight", "tdk"], title: "The Dark Knight", year: 2008 },
+  { patterns: ["inception"], title: "Inception", year: 2010 },
+  { patterns: ["matrix", "the matrix"], title: "The Matrix", year: 1999 },
+  {
+    patterns: ["avengers endgame", "endgame"],
+    title: "Avengers: Endgame",
+    year: 2019,
+  },
+];
+
+/**
+ * Try to extract a movie title from video metadata heuristically.
+ * Returns { title, year } if high confidence, null otherwise.
+ */
+function extractMovieTitleHeuristic(reel: SampleReelData): {
+  title: string;
+  year?: number;
+} | null {
+  const text = `${reel.videoTitle} ${reel.channelTitle} ${reel.memeTag || ""}`.toLowerCase();
+
+  for (const movie of KNOWN_MOVIES) {
+    for (const pattern of movie.patterns) {
+      if (text.includes(pattern)) {
+        return { title: movie.title, year: movie.year };
+      }
+    }
+  }
+
+  return null;
+}
+
 async function identifyAndResolveMovie(
   reel: SampleReelData,
+  useGemini: boolean,
 ): Promise<IdentifyResult> {
   try {
+    // Try heuristic extraction first
+    const heuristic = extractMovieTitleHeuristic(reel);
+    if (heuristic) {
+      const movie = await searchTmdbMovie({
+        title: heuristic.title,
+        year: heuristic.year,
+      });
+      if (movie) {
+        return { movie };
+      }
+    }
+
+    // Fall back to Gemini only if allowed
+    if (!useGemini) {
+      return { movie: null };
+    }
+
     const result = await identifyMovieFromReelWithRetry(
       {
         videoTitle: reel.videoTitle,
@@ -100,7 +155,8 @@ async function identifyAndResolveMovie(
 }
 
 /**
- * Process reels sequentially to avoid Gemini free-tier rate limits.
+ * Process reels sequentially with heuristic-first approach.
+ * Only calls Gemini for reels the heuristic misses, up to a cap.
  * Returns array of successful identifications and whether rate limiting occurred.
  */
 async function identifyReelsSequential(
@@ -108,12 +164,20 @@ async function identifyReelsSequential(
 ): Promise<{ items: MemeReelApiItem[]; rateLimited: boolean }> {
   const items: MemeReelApiItem[] = [];
   let rateLimited = false;
+  let geminiCallsUsed = 0;
+  const MAX_GEMINI_CALLS = 2;
 
   for (const reel of reels) {
-    const result = await identifyAndResolveMovie(reel);
+    const useGemini = geminiCallsUsed < MAX_GEMINI_CALLS;
+    const result = await identifyAndResolveMovie(reel, useGemini);
 
     if (result.rateLimited) {
       rateLimited = true;
+    }
+
+    // Track if we actually called Gemini (heuristic miss + useGemini was true)
+    if (useGemini && !extractMovieTitleHeuristic(reel)) {
+      geminiCallsUsed++;
     }
 
     if (result.movie) {
@@ -134,14 +198,14 @@ async function identifyReelsSequential(
 /**
  * Cached function that performs the actual identification work.
  * Only called when both TMDB and Gemini keys are configured.
- * Uses sequential processing to avoid Gemini free-tier rate limits.
- * Cache key bumped to v4 after adding fresh-retry pattern for empty results.
+ * Uses heuristic extraction first, then sequential Gemini calls (capped at 2).
+ * Cache key bumped to v5 after adding heuristic-first approach to reduce Gemini quota usage.
  */
 const identifyReelsCached = unstable_cache(
   async (): Promise<{ items: MemeReelApiItem[]; rateLimited: boolean }> => {
     return await identifyReelsSequential(SAMPLE_REELS);
   },
-  ["explore-meme-reels-v4"],
+  ["explore-meme-reels-v5"],
   { revalidate: 3600 },
 );
 
