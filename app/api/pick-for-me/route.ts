@@ -45,8 +45,8 @@ function normalizeVibe(s: string | undefined): PickForMeVibe {
 }
 
 function safeGeminiModelId(raw: string | undefined): string {
-  const d = (raw ?? "gemini-2.0-flash").trim();
-  return /^[a-zA-Z0-9._-]+$/.test(d) ? d : "gemini-2.0-flash";
+  const d = (raw ?? "gemini-3.5-flash").trim();
+  return /^[a-zA-Z0-9._-]+$/.test(d) ? d : "gemini-3.5-flash";
 }
 
 function parseAiHintsJson(text: string): AiHints | null {

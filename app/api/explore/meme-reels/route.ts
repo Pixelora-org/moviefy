@@ -94,36 +94,42 @@ async function identifyAndResolveMovie(
 }
 
 /**
- * Cached function that performs the actual identification work.
- * Only called when both TMDB and Gemini keys are configured.
+ * Performs the actual identification work (not cached).
+ */
+async function identifyReels(): Promise<MemeReelApiItem[]> {
+  const identificationResults = await Promise.all(
+    SAMPLE_REELS.map((reel) => identifyAndResolveMovie(reel)),
+  );
+
+  const items: MemeReelApiItem[] = [];
+
+  for (let i = 0; i < SAMPLE_REELS.length; i++) {
+    const reel = SAMPLE_REELS[i];
+    const movie = identificationResults[i];
+
+    if (movie) {
+      items.push({
+        videoId: reel.videoId,
+        videoTitle: reel.videoTitle,
+        channelTitle: reel.channelTitle,
+        thumbnail: reel.thumbnail,
+        memeTag: reel.memeTag,
+        movie,
+      });
+    }
+  }
+
+  return items;
+}
+
+/**
+ * Cached wrapper that only caches non-empty successful results.
+ * Cache key bumped to v2 to invalidate stale empty caches from the
+ * gemini-2.0-flash model failure.
  */
 const identifyReelsCached = unstable_cache(
-  async (): Promise<MemeReelApiItem[]> => {
-    const identificationResults = await Promise.all(
-      SAMPLE_REELS.map((reel) => identifyAndResolveMovie(reel)),
-    );
-
-    const items: MemeReelApiItem[] = [];
-
-    for (let i = 0; i < SAMPLE_REELS.length; i++) {
-      const reel = SAMPLE_REELS[i];
-      const movie = identificationResults[i];
-
-      if (movie) {
-        items.push({
-          videoId: reel.videoId,
-          videoTitle: reel.videoTitle,
-          channelTitle: reel.channelTitle,
-          thumbnail: reel.thumbnail,
-          memeTag: reel.memeTag,
-          movie,
-        });
-      }
-    }
-
-    return items;
-  },
-  ["explore-meme-reels-v1"],
+  identifyReels,
+  ["explore-meme-reels-v2"],
   { revalidate: 3600 },
 );
 
@@ -160,7 +166,17 @@ export async function GET() {
   // Only cache when fully configured
   const items = await identifyReelsCached();
 
+  // Don't cache empty results - refetch uncached to avoid sticky failures
   if (items.length === 0) {
+    const freshItems = await identifyReels();
+    if (freshItems.length > 0) {
+      // Fresh call succeeded; return it (next request will cache it)
+      return NextResponse.json({
+        configured,
+        items: freshItems,
+      } satisfies MemeReelsApiResponse);
+    }
+    // Still empty - return emptyHint without caching for next time
     return NextResponse.json({
       configured,
       items: [],
