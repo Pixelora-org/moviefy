@@ -23,6 +23,10 @@ type AiHints = {
   era?: string;
 };
 
+type InterpretationResult =
+  | { success: true; hints: AiHints; usedFallback: boolean }
+  | { success: false; rateLimited?: boolean };
+
 function normalizeEra(s: string | undefined): PickForMeEra {
   const e = (s ?? "any").toLowerCase();
   if (
@@ -67,13 +71,92 @@ function parseAiHintsJson(text: string): AiHints | null {
   }
 }
 
+/**
+ * Deterministic keyword fallback for obvious language/era hints when Gemini is unavailable.
+ * Returns partial hints based on simple keyword matching.
+ */
+function keywordFallbackHints(prompt: string): AiHints {
+  const lower = prompt.toLowerCase();
+  const hints: AiHints = {};
+
+  // Language keywords
+  const languageMap: Record<string, string> = {
+    hindi: "hi",
+    tamil: "ta",
+    telugu: "te",
+    malayalam: "ml",
+    kannada: "kn",
+    spanish: "es",
+    french: "fr",
+    german: "de",
+    japanese: "ja",
+    korean: "ko",
+    chinese: "zh",
+    portuguese: "pt",
+    italian: "it",
+    english: "en",
+  };
+
+  for (const [keyword, code] of Object.entries(languageMap)) {
+    if (lower.includes(keyword)) {
+      hints.language = code;
+      break;
+    }
+  }
+
+  // Era keywords
+  if (lower.match(/\b(90s|90's|1990s|nineties)\b/)) {
+    hints.era = "1990s";
+  } else if (lower.match(/\b(2000s|00s|00's|two thousands)\b/)) {
+    hints.era = "2000s";
+  } else if (lower.match(/\b(2010s|10s|10's)\b/)) {
+    hints.era = "2010s";
+  } else if (lower.match(/\b(2020s|20s|20's|recent)\b/)) {
+    hints.era = "2020s";
+  } else if (
+    lower.match(/\b(classic|classics|old|vintage|retro|80s|70s|60s|50s)\b/)
+  ) {
+    hints.era = "classics";
+  }
+
+  // Common mood/genre keywords
+  const genreKeywords: Record<string, Genre> = {
+    thriller: "Thriller",
+    comedy: "Comedy",
+    romantic: "Romance",
+    romance: "Romance",
+    action: "Action",
+    horror: "Horror",
+    drama: "Drama",
+    scifi: "Sci-Fi",
+    "sci-fi": "Sci-Fi",
+    "science fiction": "Sci-Fi",
+    fantasy: "Sci-Fi",
+    animated: "Animation",
+    animation: "Animation",
+  };
+
+  const foundGenres: Genre[] = [];
+  for (const [keyword, genre] of Object.entries(genreKeywords)) {
+    if (lower.includes(keyword) && !foundGenres.includes(genre)) {
+      foundGenres.push(genre);
+    }
+  }
+  if (foundGenres.length > 0) {
+    hints.genres = foundGenres;
+  }
+
+  return hints;
+}
+
 /** Google AI Studio / Gemini API — key as `GEMINI_API_KEY`. */
 async function interpretPromptWithGemini(
   body: PickForMeRequest,
-): Promise<AiHints | null> {
+  maxRetries: number = 3,
+): Promise<InterpretationResult> {
   const key = process.env.GEMINI_API_KEY?.trim();
   const prompt = body.prompt?.trim() ?? "";
-  if (!key || !prompt) return null;
+  if (!key || !prompt) return { success: false };
 
   const model = safeGeminiModelId(process.env.GEMINI_PICK_MODEL);
   const uiGenres = body.genres.length ? body.genres.join(", ") : "none";
@@ -100,51 +183,130 @@ ${prompt.slice(0, 800)}`;
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
 
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: system }] },
-        contents: [
-          {
-            role: "user",
-            parts: [{ text: userText }],
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: system }] },
+          contents: [
+            {
+              role: "user",
+              parts: [{ text: userText }],
+            },
+          ],
+          generationConfig: {
+            temperature: 0.25,
+            maxOutputTokens: 512,
+            responseMimeType: "application/json",
+            thinkingConfig: {
+              thinking_level: "low",
+            },
           },
-        ],
-        generationConfig: {
-          temperature: 0.25,
-          maxOutputTokens: 512,
-          responseMimeType: "application/json",
-          thinkingConfig: {
-            thinking_level: "low",
-          },
-        },
-      }),
-    });
-    if (!res.ok) return null;
-    const data = (await res.json()) as {
-      candidates?: {
-        content?: { parts?: { text?: string }[] };
-        finishReason?: string;
-      }[];
-    };
-    const candidate = data.candidates?.[0];
-    const raw = candidate?.content?.parts?.[0]?.text;
-    if (!raw) {
-      console.warn(
-        "[interpretPromptWithGemini] Empty response from Gemini:",
-        JSON.stringify({
-          finishReason: candidate?.finishReason,
-          hasCandidate: !!candidate,
         }),
+      });
+
+      if (res.status === 429) {
+        const retryAfter = res.headers.get("Retry-After");
+        const waitMs = retryAfter
+          ? parseInt(retryAfter, 10) * 1000
+          : Math.min(1000 * Math.pow(2, attempt), 8000);
+
+        if (attempt < maxRetries) {
+          console.warn(
+            `[interpretPromptWithGemini] 429 rate limit, retry ${attempt + 1}/${maxRetries} after ${waitMs}ms`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, waitMs));
+          continue;
+        }
+
+        console.error(
+          "[interpretPromptWithGemini] Gemini API failed: 429 Too Many Requests, falling back to keywords",
+        );
+        return {
+          success: true,
+          hints: keywordFallbackHints(prompt),
+          usedFallback: true,
+        };
+      }
+
+      if (!res.ok) {
+        console.warn(
+          `[interpretPromptWithGemini] Gemini API failed: ${res.status} ${res.statusText}`,
+        );
+        if (attempt === maxRetries) {
+          return {
+            success: true,
+            hints: keywordFallbackHints(prompt),
+            usedFallback: true,
+          };
+        }
+        await new Promise((resolve) =>
+          setTimeout(resolve, Math.min(1000 * Math.pow(2, attempt), 4000)),
+        );
+        continue;
+      }
+
+      const data = (await res.json()) as {
+        candidates?: {
+          content?: { parts?: { text?: string }[] };
+          finishReason?: string;
+        }[];
+      };
+      const candidate = data.candidates?.[0];
+      const raw = candidate?.content?.parts?.[0]?.text;
+      if (!raw) {
+        console.warn(
+          "[interpretPromptWithGemini] Empty response from Gemini:",
+          JSON.stringify({
+            finishReason: candidate?.finishReason,
+            hasCandidate: !!candidate,
+          }),
+        );
+        return {
+          success: true,
+          hints: keywordFallbackHints(prompt),
+          usedFallback: true,
+        };
+      }
+
+      const parsed = parseAiHintsJson(raw);
+      if (!parsed) {
+        console.warn(
+          "[interpretPromptWithGemini] Failed to parse JSON from Gemini, using fallback",
+        );
+        return {
+          success: true,
+          hints: keywordFallbackHints(prompt),
+          usedFallback: true,
+        };
+      }
+
+      return { success: true, hints: parsed, usedFallback: false };
+    } catch (err) {
+      console.error(
+        `[interpretPromptWithGemini] Exception on attempt ${attempt + 1}:`,
+        err,
       );
-      return null;
+      if (attempt === maxRetries) {
+        return {
+          success: true,
+          hints: keywordFallbackHints(prompt),
+          usedFallback: true,
+        };
+      }
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.min(1000 * Math.pow(2, attempt), 4000)),
+      );
     }
-    return parseAiHintsJson(raw);
-  } catch {
-    return null;
   }
+
+  return {
+    success: true,
+    hints: keywordFallbackHints(prompt),
+    usedFallback: true,
+  };
 }
 
 function mergeRequestWithAi(
@@ -249,11 +411,18 @@ export async function POST(request: NextRequest) {
   };
 
   let usedAi = false;
+  let usedFallback = false;
   if (prompt && process.env.GEMINI_API_KEY) {
-    const hints = await interpretPromptWithGemini(effective);
-    if (hints) {
-      effective = mergeRequestWithAi(effective, hints);
+    const result = await interpretPromptWithGemini(effective);
+    if (result.success) {
+      effective = mergeRequestWithAi(effective, result.hints);
       usedAi = true;
+      usedFallback = result.usedFallback;
+      if (usedFallback) {
+        console.log(
+          "[pick-for-me] Used keyword fallback for prompt interpretation",
+        );
+      }
     }
   }
 
@@ -262,6 +431,7 @@ export async function POST(request: NextRequest) {
       configured: false,
       movies: [],
       usedPromptInterpretation: usedAi,
+      usedFallback,
       warning: "Add TMDB_API_KEY for Pick-for-me.",
     });
   }
@@ -342,6 +512,7 @@ export async function POST(request: NextRequest) {
     configured: true,
     movies,
     usedPromptInterpretation: usedAi,
+    usedFallback,
     effective: {
       genres: effective.genres,
       language: effective.language || null,
