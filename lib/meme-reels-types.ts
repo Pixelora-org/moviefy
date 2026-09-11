@@ -10,7 +10,7 @@ export type MemeReelApiItem = {
 };
 
 export type MemeReelsApiResponse = {
-  configured: { tmdb: boolean; youtube: boolean };
+  configured: { tmdb: boolean; youtube: boolean; gemini?: boolean };
   items: MemeReelApiItem[];
   warning?: string;
   /** When items are empty but keys exist — e.g. YouTube quota or API error text. */
