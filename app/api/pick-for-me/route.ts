@@ -412,17 +412,28 @@ export async function POST(request: NextRequest) {
 
   let usedAi = false;
   let usedFallback = false;
-  if (prompt && process.env.GEMINI_API_KEY) {
-    const result = await interpretPromptWithGemini(effective);
-    if (result.success) {
-      effective = mergeRequestWithAi(effective, result.hints);
-      usedAi = true;
-      usedFallback = result.usedFallback;
-      if (usedFallback) {
-        console.log(
-          "[pick-for-me] Used keyword fallback for prompt interpretation",
-        );
+  if (prompt) {
+    if (process.env.GEMINI_API_KEY) {
+      const result = await interpretPromptWithGemini(effective);
+      if (result.success) {
+        effective = mergeRequestWithAi(effective, result.hints);
+        usedAi = true;
+        usedFallback = result.usedFallback;
+        if (usedFallback) {
+          console.log(
+            "[pick-for-me] Used keyword fallback for prompt interpretation",
+          );
+        }
       }
+    } else {
+      // No Gemini key, use keyword fallback directly
+      const fallbackHints = keywordFallbackHints(prompt);
+      effective = mergeRequestWithAi(effective, fallbackHints);
+      usedAi = true;
+      usedFallback = true;
+      console.log(
+        "[pick-for-me] No Gemini key, using keyword fallback for prompt interpretation",
+      );
     }
   }
 
