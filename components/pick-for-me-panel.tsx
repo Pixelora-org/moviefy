@@ -28,6 +28,7 @@ type ApiResponse = {
   configured?: boolean;
   movies?: Movie[];
   usedPromptInterpretation?: boolean;
+  usedFallback?: boolean;
   warning?: string;
   effective?: {
     genres: Genre[];
@@ -62,6 +63,7 @@ export function PickForMePanel({ onPickMovie }: PickForMePanelProps) {
   const [results, setResults] = useState<Movie[]>([]);
   const [hint, setHint] = useState<string | null>(null);
   const [usedAi, setUsedAi] = useState(false);
+  const [usedFallback, setUsedFallback] = useState(false);
 
   const toggleGenre = useCallback((g: Genre) => {
     setSelectedGenres((prev) =>
@@ -92,6 +94,7 @@ export function PickForMePanel({ onPickMovie }: PickForMePanelProps) {
       }
       setResults(data.movies ?? []);
       setUsedAi(Boolean(data.usedPromptInterpretation));
+      setUsedFallback(Boolean(data.usedFallback));
       if (data.warning) setHint(data.warning);
       else if (!(data.movies?.length)) {
         setHint(
@@ -137,9 +140,18 @@ export function PickForMePanel({ onPickMovie }: PickForMePanelProps) {
             </div>
           </div>
           {usedAi ? (
-            <Badge className="shrink-0 border-0 bg-violet-500/25 text-violet-100">
+            <Badge
+              className={cn(
+                "shrink-0 border-0 text-violet-100",
+                usedFallback
+                  ? "bg-amber-500/30"
+                  : "bg-violet-500/25",
+              )}
+            >
               <Sparkles className="mr-1 size-3" />
-              Used Gemini text hints
+              {usedFallback
+                ? "Used keyword hints"
+                : "Used Gemini text hints"}
             </Badge>
           ) : null}
         </div>
