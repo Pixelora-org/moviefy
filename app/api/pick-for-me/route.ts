@@ -114,17 +114,33 @@ ${prompt.slice(0, 800)}`;
         ],
         generationConfig: {
           temperature: 0.25,
-          maxOutputTokens: 320,
+          maxOutputTokens: 512,
           responseMimeType: "application/json",
+          thinkingConfig: {
+            thinking_level: "low",
+          },
         },
       }),
     });
     if (!res.ok) return null;
     const data = (await res.json()) as {
-      candidates?: { content?: { parts?: { text?: string }[] } }[];
+      candidates?: {
+        content?: { parts?: { text?: string }[] };
+        finishReason?: string;
+      }[];
     };
-    const raw = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!raw) return null;
+    const candidate = data.candidates?.[0];
+    const raw = candidate?.content?.parts?.[0]?.text;
+    if (!raw) {
+      console.warn(
+        "[interpretPromptWithGemini] Empty response from Gemini:",
+        JSON.stringify({
+          finishReason: candidate?.finishReason,
+          hasCandidate: !!candidate,
+        }),
+      );
+      return null;
+    }
     return parseAiHintsJson(raw);
   } catch {
     return null;

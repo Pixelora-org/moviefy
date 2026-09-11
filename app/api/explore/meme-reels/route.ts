@@ -5,7 +5,10 @@ import type {
   MemeReelApiItem,
 } from "@/lib/meme-reels-types";
 import type { Movie } from "@/lib/types";
-import { identifyMovieFromReel } from "@/lib/identify-movie-from-reel";
+import {
+  identifyMovieFromReel,
+  identifyMovieFromReelWithRetry,
+} from "@/lib/identify-movie-from-reel";
 import { searchTmdbMovie } from "@/lib/tmdb-movie-search";
 
 export const runtime = "nodejs";
@@ -28,108 +31,120 @@ const SAMPLE_REELS: SampleReelData[] = [
     videoId: "sample_1",
     videoTitle: "That Interstellar Docking Scene - Best Movie Moment Ever",
     channelTitle: "Cinema Memes",
-    thumbnail:
-      "https://img.youtube.com/vi/a3lcGnMhvsA/mqdefault.jpg",
+    thumbnail: "https://img.youtube.com/vi/a3lcGnMhvsA/mqdefault.jpg",
     memeTag: "iconic",
   },
   {
     videoId: "sample_2",
-    videoTitle: "The Dark Knight Joker 'Why So Serious?' - Legendary Performance",
+    videoTitle:
+      "The Dark Knight Joker 'Why So Serious?' - Legendary Performance",
     channelTitle: "Movie Clips HD",
-    thumbnail:
-      "https://img.youtube.com/vi/xnOLhXmhkyA/mqdefault.jpg",
+    thumbnail: "https://img.youtube.com/vi/xnOLhXmhkyA/mqdefault.jpg",
     memeTag: "legendary",
   },
   {
     videoId: "sample_3",
     videoTitle: "Inception BRAAAAM Sound Effect Compilation",
     channelTitle: "Film Edits",
-    thumbnail:
-      "https://img.youtube.com/vi/G2jUhnCU9iA/mqdefault.jpg",
+    thumbnail: "https://img.youtube.com/vi/G2jUhnCU9iA/mqdefault.jpg",
     memeTag: "sound",
   },
   {
     videoId: "sample_4",
     videoTitle: "The Matrix Red Pill Blue Pill Choice Scene Explained",
     channelTitle: "Sci-Fi Breakdowns",
-    thumbnail:
-      "https://img.youtube.com/vi/zE7PKRjrid4/mqdefault.jpg",
+    thumbnail: "https://img.youtube.com/vi/zE7PKRjrid4/mqdefault.jpg",
     memeTag: "philosophy",
   },
   {
     videoId: "sample_5",
     videoTitle: "Avengers Endgame 'I Am Iron Man' - Most Emotional MCU Moment",
     channelTitle: "Marvel Fans",
-    thumbnail:
-      "https://img.youtube.com/vi/eXcmOFDPP3c/mqdefault.jpg",
+    thumbnail: "https://img.youtube.com/vi/eXcmOFDPP3c/mqdefault.jpg",
     memeTag: "emotional",
   },
 ];
 
+type IdentifyResult = {
+  movie: Movie | null;
+  rateLimited?: boolean;
+};
+
 async function identifyAndResolveMovie(
   reel: SampleReelData,
-): Promise<Movie | null> {
+): Promise<IdentifyResult> {
   try {
-    const identification = await identifyMovieFromReel({
-      videoTitle: reel.videoTitle,
-      channelTitle: reel.channelTitle,
-      memeTag: reel.memeTag,
-    });
+    const result = await identifyMovieFromReelWithRetry(
+      {
+        videoTitle: reel.videoTitle,
+        channelTitle: reel.channelTitle,
+        memeTag: reel.memeTag,
+      },
+      3,
+    );
 
-    if (!identification) return null;
+    if (!result.success) {
+      return { movie: null, rateLimited: result.rateLimited };
+    }
 
-    if (identification.confidence === "low") {
-      return null;
+    if (result.data.confidence === "low") {
+      return { movie: null };
     }
 
     const movie = await searchTmdbMovie({
-      title: identification.title,
-      year: identification.year,
+      title: result.data.title,
+      year: result.data.year,
     });
 
-    return movie;
+    return { movie };
   } catch {
-    return null;
+    return { movie: null };
   }
 }
 
 /**
- * Performs the actual identification work (not cached).
+ * Process reels sequentially to avoid Gemini free-tier rate limits.
+ * Returns array of successful identifications and whether rate limiting occurred.
  */
-async function identifyReels(): Promise<MemeReelApiItem[]> {
-  const identificationResults = await Promise.all(
-    SAMPLE_REELS.map((reel) => identifyAndResolveMovie(reel)),
-  );
-
+async function identifyReelsSequential(
+  reels: SampleReelData[],
+): Promise<{ items: MemeReelApiItem[]; rateLimited: boolean }> {
   const items: MemeReelApiItem[] = [];
+  let rateLimited = false;
 
-  for (let i = 0; i < SAMPLE_REELS.length; i++) {
-    const reel = SAMPLE_REELS[i];
-    const movie = identificationResults[i];
+  for (const reel of reels) {
+    const result = await identifyAndResolveMovie(reel);
 
-    if (movie) {
+    if (result.rateLimited) {
+      rateLimited = true;
+    }
+
+    if (result.movie) {
       items.push({
         videoId: reel.videoId,
         videoTitle: reel.videoTitle,
         channelTitle: reel.channelTitle,
         thumbnail: reel.thumbnail,
         memeTag: reel.memeTag,
-        movie,
+        movie: result.movie,
       });
     }
   }
 
-  return items;
+  return { items, rateLimited };
 }
 
 /**
- * Cached wrapper that only caches non-empty successful results.
- * Cache key bumped to v2 to invalidate stale empty caches from the
- * gemini-2.0-flash model failure.
+ * Cached function that performs the actual identification work.
+ * Only called when both TMDB and Gemini keys are configured.
+ * Uses sequential processing to avoid Gemini free-tier rate limits.
+ * Cache key bumped to v3 to clear stale results from parallel/thinking issues.
  */
 const identifyReelsCached = unstable_cache(
-  identifyReels,
-  ["explore-meme-reels-v2"],
+  async (): Promise<{ items: MemeReelApiItem[]; rateLimited: boolean }> => {
+    return await identifyReelsSequential(SAMPLE_REELS);
+  },
+  ["explore-meme-reels-v3"],
   { revalidate: 3600 },
 );
 
@@ -164,29 +179,22 @@ export async function GET() {
   }
 
   // Only cache when fully configured
-  const items = await identifyReelsCached();
+  const result = await identifyReelsCached();
 
-  // Don't cache empty results - refetch uncached to avoid sticky failures
-  if (items.length === 0) {
-    const freshItems = await identifyReels();
-    if (freshItems.length > 0) {
-      // Fresh call succeeded; return it (next request will cache it)
-      return NextResponse.json({
-        configured,
-        items: freshItems,
-      } satisfies MemeReelsApiResponse);
-    }
-    // Still empty - return emptyHint without caching for next time
+  if (result.items.length === 0) {
+    const hint = result.rateLimited
+      ? "Gemini API rate limited. Try again shortly or upgrade your API tier."
+      : "Could not identify movies from sample reels. Check API keys and try again.";
+
     return NextResponse.json({
       configured,
       items: [],
-      emptyHint:
-        "Could not identify movies from sample reels. Check API keys and try again.",
+      emptyHint: hint,
     } satisfies MemeReelsApiResponse);
   }
 
   return NextResponse.json({
     configured,
-    items,
+    items: result.items,
   } satisfies MemeReelsApiResponse);
 }
