@@ -93,36 +93,12 @@ async function identifyAndResolveMovie(
   }
 }
 
-const getMemeReels = unstable_cache(
-  async (): Promise<MemeReelsApiResponse> => {
-    const configured = {
-      tmdb: Boolean(process.env.TMDB_API_KEY?.trim()),
-      youtube: Boolean(
-        process.env.YOUTUBE_API_KEY?.trim() ||
-          process.env.YOUTUBE_DATA_API_KEY?.trim() ||
-          process.env.GOOGLE_API_KEY?.trim(),
-      ),
-    };
-
-    if (!configured.tmdb) {
-      return {
-        configured,
-        items: [],
-        warning: "Set TMDB_API_KEY to enable meme reels movie identification.",
-      };
-    }
-
-    const hasGemini = Boolean(process.env.GEMINI_API_KEY?.trim());
-
-    if (!hasGemini) {
-      return {
-        configured,
-        items: [],
-        warning:
-          "Set GEMINI_API_KEY to enable AI-powered movie identification for meme reels.",
-      };
-    }
-
+/**
+ * Cached function that performs the actual identification work.
+ * Only called when both TMDB and Gemini keys are configured.
+ */
+const identifyReelsCached = unstable_cache(
+  async (): Promise<MemeReelApiItem[]> => {
     const identificationResults = await Promise.all(
       SAMPLE_REELS.map((reel) => identifyAndResolveMovie(reel)),
     );
@@ -145,25 +121,56 @@ const getMemeReels = unstable_cache(
       }
     }
 
-    if (items.length === 0) {
-      return {
-        configured,
-        items: [],
-        emptyHint:
-          "Could not identify movies from sample reels. Check API keys and try again.",
-      };
-    }
-
-    return {
-      configured,
-      items,
-    };
+    return items;
   },
   ["explore-meme-reels-v1"],
   { revalidate: 3600 },
 );
 
 export async function GET() {
-  const body = await getMemeReels();
-  return NextResponse.json(body);
+  const configured = {
+    tmdb: Boolean(process.env.TMDB_API_KEY?.trim()),
+    youtube: Boolean(
+      process.env.YOUTUBE_API_KEY?.trim() ||
+        process.env.YOUTUBE_DATA_API_KEY?.trim() ||
+        process.env.GOOGLE_API_KEY?.trim(),
+    ),
+  };
+
+  const hasGemini = Boolean(process.env.GEMINI_API_KEY?.trim());
+
+  // Return early for unconfigured cases without caching
+  if (!configured.tmdb) {
+    return NextResponse.json({
+      configured,
+      items: [],
+      warning: "Set TMDB_API_KEY to enable meme reels movie identification.",
+    } satisfies MemeReelsApiResponse);
+  }
+
+  if (!hasGemini) {
+    return NextResponse.json({
+      configured,
+      items: [],
+      warning:
+        "Set GEMINI_API_KEY to enable AI-powered movie identification for meme reels.",
+    } satisfies MemeReelsApiResponse);
+  }
+
+  // Only cache when fully configured
+  const items = await identifyReelsCached();
+
+  if (items.length === 0) {
+    return NextResponse.json({
+      configured,
+      items: [],
+      emptyHint:
+        "Could not identify movies from sample reels. Check API keys and try again.",
+    } satisfies MemeReelsApiResponse);
+  }
+
+  return NextResponse.json({
+    configured,
+    items,
+  } satisfies MemeReelsApiResponse);
 }

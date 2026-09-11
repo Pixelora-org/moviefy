@@ -56,7 +56,7 @@ export function MemeReelsSection({
             </p>
           </div>
         </div>
-        {!hasReels && (
+        {showComingSoon && (
           <Badge className="shrink-0 border-0 bg-amber-500/15 text-amber-100">
             <Sparkles className="mr-1 size-3" aria-hidden />
             Coming soon
