@@ -44,8 +44,8 @@ function normalizeConfidence(
 }
 
 function safeGeminiModelId(raw: string | undefined): string {
-  const d = (raw ?? "gemini-2.0-flash").trim();
-  return /^[a-zA-Z0-9._-]+$/.test(d) ? d : "gemini-2.0-flash";
+  const d = (raw ?? "gemini-3.5-flash").trim();
+  return /^[a-zA-Z0-9._-]+$/.test(d) ? d : "gemini-3.5-flash";
 }
 
 /**
@@ -103,7 +103,12 @@ Identify the movie this video is about.`;
       }),
     });
 
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.error(
+        `[identifyMovieFromReel] Gemini API failed: ${res.status} ${res.statusText}`,
+      );
+      return null;
+    }
 
     const data = (await res.json()) as {
       candidates?: { content?: { parts?: { text?: string }[] } }[];
