@@ -5,10 +5,7 @@ import type {
   MemeReelApiItem,
 } from "@/lib/meme-reels-types";
 import type { Movie } from "@/lib/types";
-import {
-  identifyMovieFromReel,
-  identifyMovieFromReelWithRetry,
-} from "@/lib/identify-movie-from-reel";
+import { identifyMovieFromReelWithRetry } from "@/lib/identify-movie-from-reel";
 import { searchTmdbMovie } from "@/lib/tmdb-movie-search";
 
 export const runtime = "nodejs";
@@ -138,13 +135,13 @@ async function identifyReelsSequential(
  * Cached function that performs the actual identification work.
  * Only called when both TMDB and Gemini keys are configured.
  * Uses sequential processing to avoid Gemini free-tier rate limits.
- * Cache key bumped to v3 to clear stale results from parallel/thinking issues.
+ * Cache key bumped to v4 after adding fresh-retry pattern for empty results.
  */
 const identifyReelsCached = unstable_cache(
   async (): Promise<{ items: MemeReelApiItem[]; rateLimited: boolean }> => {
     return await identifyReelsSequential(SAMPLE_REELS);
   },
-  ["explore-meme-reels-v3"],
+  ["explore-meme-reels-v4"],
   { revalidate: 3600 },
 );
 
@@ -181,8 +178,18 @@ export async function GET() {
   // Only cache when fully configured
   const result = await identifyReelsCached();
 
+  // Don't cache empty results - retry fresh to avoid sticky failures
   if (result.items.length === 0) {
-    const hint = result.rateLimited
+    const freshResult = await identifyReelsSequential(SAMPLE_REELS);
+    if (freshResult.items.length > 0) {
+      // Fresh call succeeded; return it (next request will cache it)
+      return NextResponse.json({
+        configured,
+        items: freshResult.items,
+      } satisfies MemeReelsApiResponse);
+    }
+    // Still empty - return emptyHint without caching for next time
+    const hint = freshResult.rateLimited
       ? "Gemini API rate limited. Try again shortly or upgrade your API tier."
       : "Could not identify movies from sample reels. Check API keys and try again.";
 
