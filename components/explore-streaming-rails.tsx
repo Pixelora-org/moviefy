@@ -317,7 +317,6 @@ export function ExploreStreamingRails({ onSelectMovie }: Props) {
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
     void fetch("/api/explore/streaming-highlights")
       .then((r) => r.json() as Promise<{ rails?: StreamingHighlightRail[] }>)
       .then((d) => {

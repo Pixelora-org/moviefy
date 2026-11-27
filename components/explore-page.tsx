@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -51,7 +58,10 @@ import { useSupabaseApp } from "@/components/supabase-app-provider";
 import {
   mergeExploreRecentMovies,
   pushExploreRecent,
-  readExploreRecentOpens,
+  getExploreRecentStorageSnapshot,
+  getServerExploreRecentStorageSnapshot,
+  parseExploreRecentStorageSnapshot,
+  subscribeToExploreRecentStorage,
   type ExploreRecentOpen,
 } from "@/lib/explore-recent-storage";
 import {
@@ -92,6 +102,42 @@ import { clearExploreRecentLocal } from "@/lib/explore-recent-storage";
 import { clearAllExploreRecentOpens } from "@/lib/supabase/explore-recent-service";
 
 const WATCHLIST_SESSION_CACHE_PREFIX = "moviefy_explore_watchlist_v1_";
+const WATCHLIST_CACHE_EVENT = "moviefy:explore-watchlist-cache-change";
+
+function subscribeToWatchlistCache(onStoreChange: () => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  window.addEventListener(WATCHLIST_CACHE_EVENT, onStoreChange);
+  return () => window.removeEventListener(WATCHLIST_CACHE_EVENT, onStoreChange);
+}
+
+function getWatchlistCacheSnapshot(userId: string | null): string | null {
+  if (!userId || typeof window === "undefined") return null;
+  try {
+    return window.sessionStorage.getItem(
+      `${WATCHLIST_SESSION_CACHE_PREFIX}${userId}`,
+    );
+  } catch {
+    return null;
+  }
+}
+
+function parseWatchlistCache(snapshot: string | null): Movie[] | null {
+  if (!snapshot) return null;
+  try {
+    const parsed = JSON.parse(snapshot) as unknown;
+    return Array.isArray(parsed) && parsed.length ? (parsed as Movie[]) : null;
+  } catch {
+    return null;
+  }
+}
+
+function decodeQueryComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
 
 function talkOfTownLabel(item: TmdbDiscoverItem): string {
   const rd = item.release_date;
@@ -228,22 +274,50 @@ export function ExplorePage() {
   const pathname = usePathname() ?? "";
   const searchParams = useSearchParams();
   const searchWrapRef = useRef<HTMLDivElement>(null);
-  const genreFromUrlApplied = useRef<string | null>(null);
+  const genreFromUrlApplied = useRef<Genre | null>(null);
   const { client, appUser, dbUserId, ready } = useSupabaseApp();
   const [communityPlaylists, setCommunityPlaylists] = useState<
     CommunityPlaylist[]
   >([]);
-  const [communityLoading, setCommunityLoading] = useState(true);
+  const [communityLoadedFor, setCommunityLoadedFor] = useState<string | null>(
+    null,
+  );
+  const communityLoading =
+    !ready ||
+    Boolean(
+      client &&
+        appUser &&
+        dbUserId &&
+        communityLoadedFor !== dbUserId,
+    );
   const [searchQuery, setSearchQuery] = useState("");
-  const [genre, setGenre] = useState<BrowseGenre>("all");
+  const routeGenreValue = searchParams.get("genre");
+  const routeGenre =
+    routeGenreValue && (GENRES as readonly string[]).includes(routeGenreValue)
+      ? (routeGenreValue as Genre)
+      : null;
+  const [genreSelection, setGenreSelection] = useState<{
+    routeValue: string | null;
+    genre: BrowseGenre;
+  } | null>(null);
+  const genre =
+    genreSelection?.routeValue === routeGenreValue
+      ? genreSelection.genre
+      : routeGenre ?? genreSelection?.genre ?? "all";
   const [genreSort, setGenreSort] = useState<
     "popularity.desc" | "vote_average.desc" | "primary_release_date.desc"
   >("popularity.desc");
-  const [genreLoading, setGenreLoading] = useState(false);
-  const [genreResults, setGenreResults] = useState<TmdbDiscoverResponse["results"]>(
-    [],
-  );
-  const [genreConfigured, setGenreConfigured] = useState(true);
+  const genreQueryKey = JSON.stringify([genre, genreSort]);
+  const [genreResult, setGenreResult] = useState<{
+    query: string;
+    configured: boolean;
+    results: TmdbDiscoverResponse["results"];
+  } | null>(null);
+  const genreLoading = genreResult?.query !== genreQueryKey;
+  const genreResults =
+    genreResult?.query === genreQueryKey ? genreResult.results : [];
+  const genreConfigured =
+    genreResult?.query === genreQueryKey ? genreResult.configured : true;
   const [followedIds, setFollowedIds] = useState<Set<string>>(new Set());
   const [likedIds, setLikedIds] = useState<Set<string>>(new Set());
   const [toastMsg, setToastMsg] = useState<string | null>(null);
@@ -252,36 +326,89 @@ export function ExplorePage() {
   const [topChartWindow, setTopChartWindow] = useState<"week" | "day">("week");
   const [dayTrending, setDayTrending] = useState<TmdbDiscoverItem[]>([]);
   const [dayTrendingLoading, setDayTrendingLoading] = useState(false);
-  const [watchlistMovies, setWatchlistMovies] = useState<Movie[]>([]);
-  const [watchlistLoading, setWatchlistLoading] = useState(false);
-  const [exploreLsTick, setExploreLsTick] = useState(0);
-  const [serverExploreRecentOpens, setServerExploreRecentOpens] = useState<
-    ExploreRecentOpen[]
-  >([]);
-  const [exploreRecentLoading, setExploreRecentLoading] = useState(false);
-  const debouncedSearch = useDebouncedValue(searchQuery, 300);
-  const [suggestData, setSuggestData] = useState<SearchSuggestResponse | null>(
+  const [watchlistData, setWatchlistData] = useState<{
+    userId: string;
+    movies: Movie[];
+  } | null>(null);
+  const watchlistCacheSnapshot = useSyncExternalStore(
+    subscribeToWatchlistCache,
+    () => getWatchlistCacheSnapshot(dbUserId),
+    () => null,
+  );
+  const cachedWatchlistMovies = useMemo(
+    () => parseWatchlistCache(watchlistCacheSnapshot),
+    [watchlistCacheSnapshot],
+  );
+  const watchlistMovies =
+    dbUserId && watchlistData?.userId === dbUserId
+      ? watchlistData.movies
+      : cachedWatchlistMovies ?? [];
+  const [watchlistLoadedFor, setWatchlistLoadedFor] = useState<string | null>(
     null,
   );
-  const [suggestLoading, setSuggestLoading] = useState(false);
-  const [castPerson, setCastPerson] = useState<{
-    id: number;
-    name: string;
+  const watchlistLoading =
+    ready &&
+    Boolean(client && dbUserId && watchlistLoadedFor !== dbUserId);
+  const [serverExploreRecentData, setServerExploreRecentData] = useState<{
+    userId: string;
+    opens: ExploreRecentOpen[];
   } | null>(null);
+  const serverExploreRecentOpens = useMemo(
+    () =>
+      ready &&
+      dbUserId &&
+      serverExploreRecentData?.userId === dbUserId
+        ? serverExploreRecentData.opens
+        : [],
+    [ready, dbUserId, serverExploreRecentData],
+  );
+  const [exploreRecentLoadedFor, setExploreRecentLoadedFor] = useState<
+    string | null
+  >(null);
+  const exploreRecentLoading =
+    ready &&
+    Boolean(
+      client &&
+        dbUserId &&
+        exploreRecentLoadedFor !== dbUserId,
+    );
+  const debouncedSearch = useDebouncedValue(searchQuery, 300);
+  const [suggestResult, setSuggestResult] = useState<{
+    query: string;
+    data: SearchSuggestResponse | null;
+  } | null>(null);
+  const suggestQuery = searchQuery.trim() ? debouncedSearch.trim() : "";
+  const suggestData =
+    suggestResult?.query === suggestQuery ? suggestResult.data : null;
+  const suggestLoading =
+    Boolean(suggestQuery) && suggestResult?.query !== suggestQuery;
+  const personId = searchParams.get("personId");
+  const personName = searchParams.get("personName");
+  const castPerson =
+    personId && Number.isFinite(Number(personId))
+      ? {
+          id: Number(personId),
+          name: personName
+            ? decodeQueryComponent(personName)
+            : "Performer",
+        }
+      : null;
 
   const toast = useCallback((m: string) => setToastMsg(m), []);
 
   const clearExploreRecent = useCallback(async () => {
     clearExploreRecentLocal();
     if (client && dbUserId) {
-      const ok = await clearAllExploreRecentOpens(client, dbUserId);
+      const userId = dbUserId;
+      const ok = await clearAllExploreRecentOpens(client, userId);
       if (!ok) {
         toast("Could not clear server history — device list was cleared.");
       } else {
-        setServerExploreRecentOpens([]);
+        setServerExploreRecentData((current) =>
+          current?.userId === userId ? { userId, opens: [] } : current,
+        );
       }
     }
-    setExploreLsTick((n) => n + 1);
     toast("Recently viewed cleared");
   }, [client, dbUserId, toast]);
 
@@ -292,17 +419,16 @@ export function ExplorePage() {
   }, [toastMsg]);
 
   useEffect(() => {
-    if (!ready || !client || !appUser || !dbUserId) return;
+    if (!ready || !client || !appUser?.id || !dbUserId) return;
     let cancelled = false;
-    setCommunityLoading(true);
+    const userId = dbUserId;
     void fetchPublicCommunityPlaylists(client)
       .then((rows) => {
         if (cancelled) return;
-        const uid = dbUserId;
-        setCommunityPlaylists(rows.filter((p) => p.ownerUserId !== uid));
+        setCommunityPlaylists(rows.filter((p) => p.ownerUserId !== userId));
       })
       .finally(() => {
-        if (!cancelled) setCommunityLoading(false);
+        if (!cancelled) setCommunityLoadedFor(userId);
       });
     return () => {
       cancelled = true;
@@ -320,43 +446,26 @@ export function ExplorePage() {
   }, [ready, client, dbUserId]);
 
   useEffect(() => {
-    if (!ready || !client || !dbUserId) {
-      setWatchlistMovies([]);
-      setWatchlistLoading(false);
-      return;
-    }
+    if (!ready || !client || !dbUserId) return;
     const uid = dbUserId;
-    try {
-      const raw = sessionStorage.getItem(
-        `${WATCHLIST_SESSION_CACHE_PREFIX}${uid}`,
-      );
-      if (raw) {
-        const parsed = JSON.parse(raw) as unknown;
-        if (Array.isArray(parsed) && parsed.length) {
-          setWatchlistMovies(parsed as Movie[]);
-        }
-      }
-    } catch {
-      /* ignore */
-    }
     let cancelled = false;
-    setWatchlistLoading(true);
     void fetchSavedMoviesForUser(client, uid)
       .then((rows) => {
         if (!cancelled) {
-          setWatchlistMovies(rows);
+          setWatchlistData({ userId: uid, movies: rows });
           try {
             sessionStorage.setItem(
               `${WATCHLIST_SESSION_CACHE_PREFIX}${uid}`,
               JSON.stringify(rows),
             );
+            window.dispatchEvent(new Event(WATCHLIST_CACHE_EVENT));
           } catch {
             /* ignore */
           }
         }
       })
       .finally(() => {
-        if (!cancelled) setWatchlistLoading(false);
+        if (!cancelled) setWatchlistLoadedFor(uid);
       });
     return () => {
       cancelled = true;
@@ -364,19 +473,15 @@ export function ExplorePage() {
   }, [ready, client, dbUserId]);
 
   useEffect(() => {
-    if (!ready || !client || !dbUserId) {
-      setServerExploreRecentOpens([]);
-      setExploreRecentLoading(false);
-      return;
-    }
+    if (!ready || !client || !dbUserId) return;
     let cancelled = false;
-    setExploreRecentLoading(true);
-    void fetchExploreRecentOpens(client, dbUserId)
+    const userId = dbUserId;
+    void fetchExploreRecentOpens(client, userId)
       .then((rows) => {
-        if (!cancelled) setServerExploreRecentOpens(rows);
+        if (!cancelled) setServerExploreRecentData({ userId, opens: rows });
       })
       .finally(() => {
-        if (!cancelled) setExploreRecentLoading(false);
+        if (!cancelled) setExploreRecentLoadedFor(userId);
       });
     return () => {
       cancelled = true;
@@ -385,7 +490,6 @@ export function ExplorePage() {
 
   useEffect(() => {
     let cancelled = false;
-    setTownLoading(true);
     void fetch("/api/trending/week")
       .then((r) => r.json() as Promise<TmdbDiscoverResponse>)
       .then((d) => {
@@ -405,7 +509,6 @@ export function ExplorePage() {
   useEffect(() => {
     if (topChartWindow !== "day") return;
     let cancelled = false;
-    setDayTrendingLoading(true);
     void fetch("/api/trending/day")
       .then((r) => r.json() as Promise<TmdbDiscoverResponse>)
       .then((d) => {
@@ -427,9 +530,15 @@ export function ExplorePage() {
   const topChartLoading =
     topChartWindow === "week" ? townLoading : dayTrendingLoading;
 
+  function changeTopChartWindow(nextWindow: "week" | "day") {
+    if (nextWindow === "day" && nextWindow !== topChartWindow) {
+      setDayTrendingLoading(true);
+    }
+    setTopChartWindow(nextWindow);
+  }
+
   useEffect(() => {
     const ctrl = new AbortController();
-    setGenreLoading(true);
     const url =
       genre === "all"
         ? `/api/discover/top?sort=${encodeURIComponent(genreSort)}`
@@ -437,66 +546,50 @@ export function ExplorePage() {
     fetch(url, { signal: ctrl.signal })
       .then((r) => r.json() as Promise<TmdbDiscoverResponse>)
       .then((data) => {
-        setGenreConfigured(data.configured);
-        setGenreResults(data.results ?? []);
+        if (!ctrl.signal.aborted) {
+          setGenreResult({
+            query: genreQueryKey,
+            configured: data.configured,
+            results: data.results ?? [],
+          });
+        }
       })
       .catch(() => {
-        setGenreResults([]);
-        setGenreConfigured(false);
-      })
-      .finally(() => setGenreLoading(false));
+        if (!ctrl.signal.aborted) {
+          setGenreResult({
+            query: genreQueryKey,
+            configured: false,
+            results: [],
+          });
+        }
+      });
     return () => ctrl.abort();
-  }, [genre, genreSort]);
+  }, [genre, genreSort, genreQueryKey]);
 
   useEffect(() => {
-    const g = searchParams.get("genre");
-    if (!g || !(GENRES as readonly string[]).includes(g)) return;
-    if (genreFromUrlApplied.current === g) return;
-    genreFromUrlApplied.current = g;
-    setGenre(g as Genre);
+    if (!routeGenre || genreFromUrlApplied.current === routeGenre) return;
+    genreFromUrlApplied.current = routeGenre;
     window.requestAnimationFrame(() => {
       document.getElementById("explore-browse-genre")?.scrollIntoView({
         behavior: "smooth",
         block: "start",
       });
     });
-  }, [searchParams]);
-
-  useEffect(() => {
-    const pid = searchParams.get("personId");
-    const pnm = searchParams.get("personName");
-    if (pid && Number.isFinite(Number(pid))) {
-      setCastPerson({
-        id: Number(pid),
-        name: pnm ? decodeURIComponent(pnm) : "Performer",
-      });
-    } else {
-      setCastPerson(null);
-    }
-  }, [searchParams]);
+  }, [routeGenre]);
 
   useEffect(() => {
     const q = debouncedSearch.trim();
-    if (!q) {
-      setSuggestData(null);
-      setSuggestLoading(false);
-      return;
-    }
+    if (!q) return;
     const ctrl = new AbortController();
-    setSuggestLoading(true);
-    setSuggestData(null);
     void fetch(`/api/search/suggest?q=${encodeURIComponent(q)}`, {
       signal: ctrl.signal,
     })
       .then((r) => r.json() as Promise<SearchSuggestResponse>)
       .then((d) => {
-        if (!ctrl.signal.aborted) setSuggestData(d);
+        if (!ctrl.signal.aborted) setSuggestResult({ query: q, data: d });
       })
       .catch(() => {
-        if (!ctrl.signal.aborted) setSuggestData(null);
-      })
-      .finally(() => {
-        if (!ctrl.signal.aborted) setSuggestLoading(false);
+        if (!ctrl.signal.aborted) setSuggestResult({ query: q, data: null });
       });
     return () => ctrl.abort();
   }, [debouncedSearch]);
@@ -518,9 +611,11 @@ export function ExplorePage() {
     [communityPlaylists, followedIds],
   );
 
+  const hasCastPerson = Boolean(castPerson);
+  const hasFollowedPlaylists = followedPlaylists.length > 0;
   const exploreJumpLinks = useMemo<ExploreJumpLink[]>(() => {
     const links: ExploreJumpLink[] = [];
-    if (castPerson) {
+    if (hasCastPerson) {
       links.push({ id: "explore-section-cast", label: "Cast picks" });
     }
     links.push(
@@ -537,26 +632,30 @@ export function ExplorePage() {
       { id: "explore-browse-genre", label: "Genres" },
       { id: "explore-section-editor-picks", label: "TMDB picks" },
     );
-    if (followedPlaylists.length) {
+    if (hasFollowedPlaylists) {
       links.push({ id: "explore-section-followed", label: "Following" });
     }
     links.push({ id: "explore-public-playlists", label: "Playlists" });
     return links;
-  }, [castPerson?.id, followedPlaylists.length]);
+  }, [hasCastPerson, hasFollowedPlaylists]);
 
-  /** Avoid SSR/client mismatch: localStorage is empty on server, populated on client. */
-  const [exploreRecentLocalReady, setExploreRecentLocalReady] = useState(false);
-  useEffect(() => {
-    setExploreRecentLocalReady(true);
-  }, []);
+  const localExploreRecentSnapshot = useSyncExternalStore(
+    subscribeToExploreRecentStorage,
+    getExploreRecentStorageSnapshot,
+    getServerExploreRecentStorageSnapshot,
+  );
+  const localExploreRecentOpens = useMemo(
+    () => parseExploreRecentStorageSnapshot(localExploreRecentSnapshot),
+    [localExploreRecentSnapshot],
+  );
 
   const mergedExploreRecentMovies = useMemo(
     () =>
       mergeExploreRecentMovies(
         serverExploreRecentOpens,
-        exploreRecentLocalReady ? readExploreRecentOpens() : [],
+        localExploreRecentOpens,
       ),
-    [serverExploreRecentOpens, exploreLsTick, exploreRecentLocalReady],
+    [serverExploreRecentOpens, localExploreRecentOpens],
   );
 
   function selectMovie(movie: Movie) {
@@ -564,7 +663,6 @@ export function ExplorePage() {
     if (client && dbUserId) {
       void upsertExploreRecentOpen(client, dbUserId, movie);
     }
-    setExploreLsTick((n) => n + 1);
     const href = movieToDetailPageHref(movie, "explore");
     if (!href) {
       toast("Could not open this title — missing TMDB id.");
@@ -580,13 +678,17 @@ export function ExplorePage() {
     const item = discoverItemFromSuggestMovie(row);
     selectMovie(movieFromTmdbDiscoverItem(item));
     setSearchQuery("");
-    setSuggestData(null);
+    setSuggestResult(null);
+  }
+
+  function selectGenre(nextGenre: BrowseGenre) {
+    setGenreSelection({ routeValue: routeGenreValue, genre: nextGenre });
   }
 
   function applyGenreFromSearch(g: Genre) {
-    setGenre(g);
+    selectGenre(g);
     setSearchQuery("");
-    setSuggestData(null);
+    setSuggestResult(null);
     window.requestAnimationFrame(() => {
       document.getElementById("explore-browse-genre")?.scrollIntoView({
         behavior: "smooth",
@@ -596,9 +698,8 @@ export function ExplorePage() {
   }
 
   function applyPersonFromSearch(id: number, name: string) {
-    setCastPerson({ id, name });
     setSearchQuery("");
-    setSuggestData(null);
+    setSuggestResult(null);
     router.replace(
       `/app/explore?personId=${id}&personName=${encodeURIComponent(name)}`,
       { scroll: false },
@@ -606,7 +707,6 @@ export function ExplorePage() {
   }
 
   function clearCastPerson() {
-    setCastPerson(null);
     router.replace("/app/explore", { scroll: false });
   }
 
@@ -808,7 +908,7 @@ export function ExplorePage() {
                   className="absolute right-1.5 top-1/2 z-[1] flex size-10 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted/50 hover:text-foreground"
                   onClick={() => {
                     setSearchQuery("");
-                    setSuggestData(null);
+                    setSuggestResult(null);
                   }}
                 >
                   <X className="size-4" />
@@ -826,7 +926,7 @@ export function ExplorePage() {
                   hint: `${p.movies.length} films · @${p.ownerHandle}`,
                   onPick: () => {
                     setSearchQuery("");
-                    setSuggestData(null);
+                    setSuggestResult(null);
                     window.requestAnimationFrame(() => {
                       document
                         .getElementById("explore-public-playlists")
@@ -1037,7 +1137,7 @@ export function ExplorePage() {
                 "rounded-full border-border/70",
                 genre === "all" && "border-transparent",
               )}
-              onClick={() => setGenre("all")}
+              onClick={() => selectGenre("all")}
             >
               All
             </Button>
@@ -1051,7 +1151,7 @@ export function ExplorePage() {
                   "rounded-full border-border/70",
                   genre === g && "border-transparent",
                 )}
-                onClick={() => setGenre((prev) => (prev === g ? "all" : g))}
+                onClick={() => selectGenre(genre === g ? "all" : g)}
               >
                 {g}
               </Button>
@@ -1213,7 +1313,7 @@ export function ExplorePage() {
               loading={topChartLoading}
               items={topChartItems}
               chartWindow={topChartWindow}
-              onChartWindowChange={setTopChartWindow}
+              onChartWindowChange={changeTopChartWindow}
               onSelectMovie={selectMovie}
             />
           </div>

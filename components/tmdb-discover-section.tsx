@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { PosterImage } from "@/components/poster-image";
 import type { TmdbDiscoverResponse } from "@/lib/movie-enrich-types";
 import { movieFromTmdbDiscoverItem } from "@/lib/tmdb-genre-map";
@@ -37,31 +37,36 @@ export function TmdbDiscoverSection({
     useState<(typeof SORT_OPTIONS)[number]["value"]>("vote_average.desc");
   const [minVotes, setMinVotes] = useState("250");
   const [data, setData] = useState<TmdbDiscoverResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loadedQuery, setLoadedQuery] = useState<string | null>(null);
+  const queryKey = `${sort}:${minVotes}`;
+  const loading = loadedQuery !== queryKey;
 
-  const load = useCallback(() => {
-    setLoading(true);
+  useEffect(() => {
+    const controller = new AbortController();
     const votes = Number(minVotes) || 250;
     fetch(
       `/api/discover/top?sort=${encodeURIComponent(sort)}&minVotes=${votes}`,
+      { signal: controller.signal },
     )
       .then((res) => res.json() as Promise<TmdbDiscoverResponse>)
-      .then(setData)
-      .catch(() =>
+      .then((result) => {
+        if (!controller.signal.aborted) setData(result);
+      })
+      .catch(() => {
+        if (controller.signal.aborted) return;
         setData({
           configured: false,
           sort,
           results: [],
           page: 1,
           warning: "Request failed",
-        }),
-      )
-      .finally(() => setLoading(false));
-  }, [sort, minVotes]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+        });
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoadedQuery(queryKey);
+      });
+    return () => controller.abort();
+  }, [sort, minVotes, queryKey]);
 
   return (
     <section id={sectionId} className="scroll-mt-28">

@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
     "lint:launch": "eslint --quiet app/page.tsx 'app/app/movie/[tmdbId]/page.tsx' app/api/pick-for-me/route.ts app/api/movies/ensure/route.ts components/cine-shelf-app.tsx components/meme-reels-page.tsx components/meme-reels-section.tsx lib/movie-detail-nav.ts lib/releases-schedule-mappers.ts lib/supabase/explore-recent-service.ts lib/supabase/mappers.ts lib/supabase/movie-review-social-service.ts lib/supabase/movie-takes-service.ts lib/supabase/playlist-service.ts lib/tmdb-genre-map.ts lib/types.ts lib/http/read-limited-json.ts lib/supabase/admin.ts lib/supabase/api-rate-limit.ts lib/landing-movie-feed.ts tests/read-limited-json.test.mts tests/landing-movie-feed.test.mts",
