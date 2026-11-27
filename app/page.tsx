@@ -1,5 +1,6 @@
 import { PosterImage } from "@/components/poster-image";
 import Link from "next/link";
+import { connection } from "next/server";
 import {
   ArrowRight,
   Clapperboard,
@@ -63,6 +64,7 @@ function PosterTile({
 }
 
 export default async function Home() {
+  await connection();
   const popular = await getLandingMovies();
   const posterWall = popular.length
     ? buildLandingPosterWall(popular)

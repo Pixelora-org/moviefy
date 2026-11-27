@@ -1,5 +1,6 @@
 import type { TmdbDiscoverItem } from "@/lib/movie-enrich-types";
 import type { Movie } from "@/lib/types";
+import { fetchPopularLandingMovies } from "@/lib/landing-movie-feed";
 import { movieFromTmdbDiscoverItem } from "@/lib/tmdb-genre-map";
 
 /** Gradient-only tiles for marketing layout when TMDB is off or still loading — not real titles. */
@@ -31,13 +32,7 @@ export async function getLandingMovies(): Promise<Movie[]> {
   const key = process.env.TMDB_API_KEY?.trim();
   if (!key) return [];
   try {
-    const u = new URL("https://api.themoviedb.org/3/movie/popular");
-    u.searchParams.set("api_key", key);
-    u.searchParams.set("page", "1");
-    const res = await fetch(u.toString(), { next: { revalidate: 3600 } });
-    if (!res.ok) return [];
-    const data = (await res.json()) as { results?: TmdbDiscoverItem[] };
-    const results = data.results ?? [];
+    const results = await fetchPopularLandingMovies(key);
     const mapped = results.slice(0, 12).map((row) => movieFromTmdbDiscoverItem(row));
     return mapped.length ? mapped : [];
   } catch {

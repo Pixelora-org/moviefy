@@ -68,6 +68,8 @@ Navigate to `/app/reels` for an overview of the planned feature: identify a movi
 
 Pick-for-me accepts a prompt and returns movie suggestions. Gemini can help interpret prompts when `GEMINI_API_KEY` is configured; otherwise, the app uses keyword matching. It does not learn a personal taste profile or send daily recommendations.
 
+The public landing page loads TMDB popular movies at request time and caches the TMDB response for one hour. Configure `TMDB_API_KEY` in the production runtime environment so live posters are available without depending on the build environment.
+
 ## Environment Variables
 
 See `.env.example` for all required and optional environment variables. The application requires:
