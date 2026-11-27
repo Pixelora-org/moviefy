@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -60,6 +60,8 @@ const RELEASE_LANGS = [
   { value: "pt", label: "Portuguese" },
 ] as const;
 
+const EMPTY_TRACKED_IDS = new Set<string>();
+
 function dateBadgeParts(iso: string): { dow: string; dom: string; mon: string } {
   const t = Date.parse(`${iso}T12:00:00Z`);
   if (!Number.isFinite(t)) {
@@ -92,14 +94,28 @@ function groupByDate(items: ScheduleItem[]): Map<string, ScheduleItem[]> {
 
 export function ReleasesPage() {
   const router = useRouter();
-  const { client, appUser, dbUserId } = useSupabaseApp();
+  const { client, dbUserId } = useSupabaseApp();
   const [windowKey, setWindowKey] = useState<ScheduleWindow>("today");
   const [typeFilter, setTypeFilter] = useState<"all" | ScheduleMedia>("all");
   const [genreFilter, setGenreFilter] = useState<"all" | Genre>("all");
   const [langFilter, setLangFilter] = useState<string>("all");
   const [data, setData] = useState<ScheduleResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [trackedIds, setTrackedIds] = useState<Set<string>>(() => new Set());
+  const [loadedQuery, setLoadedQuery] = useState<string | null>(null);
+  const queryKey = JSON.stringify([
+    windowKey,
+    typeFilter,
+    genreFilter,
+    langFilter,
+  ]);
+  const loading = loadedQuery !== queryKey;
+  const [trackedWatchlist, setTrackedWatchlist] = useState<{
+    userId: string;
+    ids: Set<string>;
+  } | null>(null);
+  const trackedIds =
+    dbUserId && trackedWatchlist?.userId === dbUserId
+      ? trackedWatchlist.ids
+      : EMPTY_TRACKED_IDS;
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
   useEffect(() => {
@@ -109,25 +125,22 @@ export function ReleasesPage() {
   }, [toastMsg]);
 
   useEffect(() => {
-    if (!client || !dbUserId) {
-      setTrackedIds(new Set());
-      return;
-    }
+    if (!client || !dbUserId) return;
     let cancelled = false;
     void fetchUserReleaseWatchlist(client, dbUserId).then((rows) => {
       if (cancelled) return;
-      setTrackedIds(
-        new Set(rows.map((r) => `${r.mediaType}-${r.tmdbId}`)),
-      );
+      setTrackedWatchlist({
+        userId: dbUserId,
+        ids: new Set(rows.map((r) => `${r.mediaType}-${r.tmdbId}`)),
+      });
     });
     return () => {
       cancelled = true;
     };
   }, [client, dbUserId]);
 
-  const load = useCallback(() => {
+  useEffect(() => {
     let cancelled = false;
-    setLoading(true);
     const q = new URLSearchParams();
     q.set("window", windowKey);
     q.set("type", typeFilter);
@@ -142,21 +155,17 @@ export function ReleasesPage() {
         if (!cancelled) setData(null);
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setLoadedQuery(queryKey);
       });
     return () => {
       cancelled = true;
     };
-  }, [windowKey, typeFilter, genreFilter, langFilter]);
-
-  useEffect(() => {
-    return load();
-  }, [load]);
+  }, [windowKey, typeFilter, genreFilter, langFilter, queryKey]);
 
   const grouped = useMemo(() => {
     if (!data?.items.length) return new Map<string, ScheduleItem[]>();
     return groupByDate(data.items);
-  }, [data?.items]);
+  }, [data]);
 
   const sortedDates = useMemo(
     () => [...grouped.keys()].sort((a, b) => a.localeCompare(b)),
@@ -193,10 +202,12 @@ export function ReleasesPage() {
         setToastMsg("Could not remove from Coming up.");
         return;
       }
-      setTrackedIds((prev) => {
-        const next = new Set(prev);
+      setTrackedWatchlist((prev) => {
+        const next = new Set(
+          prev?.userId === uid ? prev.ids : EMPTY_TRACKED_IDS,
+        );
         next.delete(key);
-        return next;
+        return { userId: uid, ids: next };
       });
       setToastMsg("Removed from Coming up");
     } else {
@@ -205,7 +216,13 @@ export function ReleasesPage() {
         setToastMsg("Could not save — run the release-watchlist DB migration?");
         return;
       }
-      setTrackedIds((prev) => new Set(prev).add(key));
+      setTrackedWatchlist((prev) => {
+        const next = new Set(
+          prev?.userId === uid ? prev.ids : EMPTY_TRACKED_IDS,
+        );
+        next.add(key);
+        return { userId: uid, ids: next };
+      });
       setToastMsg("Saved to Coming up in Your theatre");
     }
     dispatchReleaseWatchlistChanged();

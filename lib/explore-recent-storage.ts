@@ -1,6 +1,7 @@
 import type { Genre, Movie } from "@/lib/types";
 
 const STORAGE_KEY = "moviefy_explore_recent_v1";
+const STORAGE_EVENT = "moviefy:explore-recent-storage-change";
 const MAX = 24;
 
 type Stored = Pick<
@@ -46,6 +47,55 @@ function toMovie(s: Stored): Movie {
   };
 }
 
+export type ExploreRecentOpen = {
+  movie: Movie;
+  openedAtMs: number;
+};
+
+export function subscribeToExploreRecentStorage(
+  onStoreChange: () => void,
+): () => void {
+  if (typeof window === "undefined") return () => {};
+  window.addEventListener("storage", onStoreChange);
+  window.addEventListener(STORAGE_EVENT, onStoreChange);
+  return () => {
+    window.removeEventListener("storage", onStoreChange);
+    window.removeEventListener(STORAGE_EVENT, onStoreChange);
+  };
+}
+
+export function getExploreRecentStorageSnapshot(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function getServerExploreRecentStorageSnapshot(): null {
+  return null;
+}
+
+export function parseExploreRecentStorageSnapshot(
+  snapshot: string | null,
+): ExploreRecentOpen[] {
+  try {
+    const prev = parseStored(JSON.parse(snapshot ?? "null"));
+    return prev
+      .map((s) => ({ movie: toMovie(s), openedAtMs: s.openedAt }))
+      .sort((a, b) => b.openedAtMs - a.openedAtMs);
+  } catch {
+    return [];
+  }
+}
+
+function notifyExploreRecentStorageChange(): void {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(STORAGE_EVENT));
+  }
+}
+
 export function pushExploreRecent(movie: Movie): void {
   if (typeof window === "undefined") return;
   try {
@@ -68,6 +118,7 @@ export function pushExploreRecent(movie: Movie): void {
       ...prev.filter((p) => p.id !== entry.id && p.tmdbId !== entry.tmdbId),
     ].slice(0, MAX);
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    notifyExploreRecentStorageChange();
   } catch {
     /* ignore */
   }
@@ -77,27 +128,15 @@ export function readExploreRecentMovies(): Movie[] {
   return readExploreRecentOpens().map((r) => r.movie);
 }
 
-export type ExploreRecentOpen = {
-  movie: Movie;
-  openedAtMs: number;
-};
-
 export function readExploreRecentOpens(): ExploreRecentOpen[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const prev = parseStored(JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "null"));
-    return prev
-      .map((s) => ({ movie: toMovie(s), openedAtMs: s.openedAt }))
-      .sort((a, b) => b.openedAtMs - a.openedAtMs);
-  } catch {
-    return [];
-  }
+  return parseExploreRecentStorageSnapshot(getExploreRecentStorageSnapshot());
 }
 
 export function clearExploreRecentLocal(): void {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.removeItem(STORAGE_KEY);
+    notifyExploreRecentStorageChange();
   } catch {
     /* ignore */
   }

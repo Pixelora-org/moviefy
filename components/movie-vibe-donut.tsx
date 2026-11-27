@@ -12,12 +12,16 @@ export function MovieVibeDonut({
   subLine?: string;
 }) {
   if (!slices.length) return null;
-  let acc = 0;
-  const parts = slices.map((s) => {
-    const start = acc;
-    acc += s.pct;
-    return `${s.color} ${start}% ${acc}%`;
-  });
+  const parts = slices.reduce<{ stops: string[]; total: number }>(
+    ({ stops, total }, slice) => {
+      const end = total + slice.pct;
+      return {
+        stops: [...stops, `${slice.color} ${total}% ${end}%`],
+        total: end,
+      };
+    },
+    { stops: [], total: 0 },
+  ).stops;
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-5">
       <div className="relative mx-auto size-[7.5rem] shrink-0 sm:mx-0">

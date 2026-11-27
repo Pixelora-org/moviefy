@@ -61,35 +61,35 @@ export function ExploreMovieRail({
   sectionId,
   accent = "default",
 }: ExploreMovieRailProps) {
-  const [loading, setLoading] = useState(Boolean(endpoint));
+  const [loadedEndpoint, setLoadedEndpoint] = useState<string | null>(null);
   const [items, setItems] = useState<TmdbDiscoverResponse["results"]>([]);
   const [configured, setConfigured] = useState(true);
 
   useEffect(() => {
-    if (!endpoint) {
-      setLoading(false);
-      setItems([]);
-      return;
-    }
+    if (!endpoint) return;
     const ctrl = new AbortController();
-    setLoading(true);
     void fetch(endpoint, { signal: ctrl.signal })
       .then((r) => r.json() as Promise<TmdbDiscoverResponse>)
       .then((d) => {
+        if (ctrl.signal.aborted) return;
         setConfigured(d.configured !== false);
         setItems(d.results ?? []);
       })
       .catch(() => {
+        if (ctrl.signal.aborted) return;
         setItems([]);
         setConfigured(false);
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!ctrl.signal.aborted) setLoadedEndpoint(endpoint);
+      });
     return () => ctrl.abort();
   }, [endpoint]);
 
   if (!endpoint) return null;
 
   const slice = items.slice(0, limit);
+  const loading = loadedEndpoint !== endpoint;
   const showSkeleton = loading && slice.length === 0;
 
   return (

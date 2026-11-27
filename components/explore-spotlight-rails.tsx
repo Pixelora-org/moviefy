@@ -22,7 +22,6 @@ export function ExploreSpotlightRails({ onSelectMovie }: Props) {
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
     void Promise.all([
       fetch("/api/discover/special?kind=awards").then(
         (r) => r.json() as Promise<TmdbDiscoverResponse>,
