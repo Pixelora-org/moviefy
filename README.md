@@ -1,12 +1,12 @@
 # Moviefy
 
-A Spotify-style movie discovery app built with Next.js, featuring AI-powered movie identification from meme reels.
+A movie discovery app built with Next.js. Meme Reels is a planned feature; movie identification is not live yet.
 
 ## Features
 
-- **Meme Reels**: AI-powered movie identification from YouTube meme videos using Gemini LLM
-- **Pick-for-me**: AI-assisted movie discovery with natural language prompts
-- **Movie Explore**: Browse trending movies, curated collections, and personalized recommendations
+- **Meme Reels**: A coming-soon concept for identifying movies from meme scenes and short clips
+- **Pick-for-me**: Prompt-based movie discovery, with Gemini-assisted prompt interpretation when configured
+- **Movie Explore**: Browse trending movies, collections, and genre-based suggestions
 - **Releases Schedule**: Track upcoming movie releases
 - **Personal Theatre**: Save and manage your favorite movies and playlists
 
@@ -15,11 +15,11 @@ A Spotify-style movie discovery app built with Next.js, featuring AI-powered mov
 You'll need API keys for the following services:
 
 1. **TMDB** (Required): Movie database - [Get API key](https://www.themoviedb.org/settings/api)
-2. **Gemini** (Required for AI features): Google's LLM - [Get API key](https://makersuite.google.com/app/apikey)
-3. **YouTube Data API** (Optional): For video reviews - [Get API key](https://console.cloud.google.com/apis/credentials)
-4. **OMDb** (Optional): Additional movie ratings - [Get API key](https://www.omdbapi.com/apikey.aspx)
-5. **Clerk** (Required): User authentication - [Get keys](https://dashboard.clerk.com/)
-6. **Supabase** (Required): Database for user data - [Get keys](https://supabase.com/dashboard)
+2. **Clerk** (Required): User authentication - [Get keys](https://dashboard.clerk.com/)
+3. **Supabase** (Required): Database for user data and trusted movie catalog writes - [Get keys](https://supabase.com/dashboard)
+4. **Gemini** (Optional): Improves Pick-for-me prompt interpretation; a keyword fallback is available - [Get API key](https://makersuite.google.com/app/apikey)
+5. **YouTube Data API** (Optional): For video reviews - [Get API key](https://console.cloud.google.com/apis/credentials)
+6. **OMDb** (Optional): Additional movie ratings - [Get API key](https://www.omdbapi.com/apikey.aspx)
 
 ## Getting Started
 
@@ -29,13 +29,22 @@ You'll need API keys for the following services:
 npm install
 ```
 
-2. Copy `.env.example` to `.env.local` and add your API keys:
+2. Copy `.env.example` to `.env.local` and add your development credentials:
 
 ```bash
 cp .env.example .env.local
 ```
 
-3. Run the development server:
+3. Prepare Supabase before running the app:
+
+- For a new database, run `supabase/schema.sql`, then `supabase/migrate-clerk-user-ids.sql`, then `supabase/migrations/20261126_launch_hardening.sql` in the Supabase SQL Editor.
+- For an existing database already migrated to Clerk string IDs, run only `supabase/migrations/20261126_launch_hardening.sql`.
+- Back up production data and review migration SQL before applying it. Apply migrations in a controlled deployment step; do not make application startup run schema changes.
+- Configure a Clerk JWT template named `supabase` and ensure its token subject matches the Clerk user ID used by the RLS policies. The app requests this template for Supabase access.
+- Set `SUPABASE_SERVICE_ROLE_KEY` only in server-side environments. It is required for catalog writes and must never be exposed to the browser.
+- The Clerk identity migration changes UUID IDs to text but does not map existing Supabase users or their data to Clerk accounts. Plan and verify any required user-data mapping separately before migrating a database with existing users.
+
+4. Run the development server:
 
 ```bash
 npm run dev
@@ -51,25 +60,25 @@ bun dev
 
 ## Key Features
 
-### Meme Reels
+### Meme Reels (coming soon)
 
-Navigate to `/app/reels` to see AI-powered movie identification from meme videos. The feature:
-- Uses Gemini LLM to identify movies from video titles, channel names, and meme tags
-- Resolves movie titles to TMDB movie data
-- Displays identified movies with direct links to movie details
-- Gracefully degrades when API keys are missing
+Navigate to `/app/reels` for an overview of the planned feature: identify a movie from a meme scene or short clip, then open and save that title. Clip analysis and an identification feed are not implemented or available yet.
 
 ### Pick-for-me
 
-An AI-powered movie recommendation system that uses Gemini to interpret natural language queries like "funny sci-fi from the 90s" and suggests movies based on your preferences.
+Pick-for-me accepts a prompt and returns movie suggestions. Gemini can help interpret prompts when `GEMINI_API_KEY` is configured; otherwise, the app uses keyword matching. It does not learn a personal taste profile or send daily recommendations.
+
+The public landing page loads TMDB popular movies at request time and caches the TMDB response for one hour. Configure `TMDB_API_KEY` in the production runtime environment so live posters are available without depending on the build environment.
 
 ## Environment Variables
 
-See `.env.example` for all required and optional environment variables. At minimum, you need:
+See `.env.example` for all required and optional environment variables. The application requires:
 - `TMDB_API_KEY`: For movie data
-- `GEMINI_API_KEY`: For AI-powered features
 - Clerk keys: For authentication
-- Supabase keys: For user data storage
+- Supabase URL and anon key: For user data storage
+- `SUPABASE_SERVICE_ROLE_KEY`: For the server-side movie catalog endpoint
+
+Gemini, YouTube, and OMDb keys are optional; see `.env.example` for their specific uses.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 

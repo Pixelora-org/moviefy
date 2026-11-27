@@ -1,4 +1,3 @@
-import { posterPathFromTmdbPosterUrl } from "@/lib/tmdb-image";
 import type { CommunityPlaylist, Movie, Playlist, PlaylistMovie } from "@/lib/types";
 import {
   movieRowToMovie,
@@ -19,40 +18,44 @@ export async function ensureMovieRow(
   movie: Movie,
 ): Promise<string | null> {
   if (UUID_RE.test(movie.id)) {
-    const { data } = await client
+    const { data, error } = await client
       .from("movies")
       .select("id")
       .eq("id", movie.id)
       .maybeSingle();
-    if (data?.id) return data.id as string;
+    if (error) {
+      console.error("[playlist-service] Existing movie lookup failed:", error);
+      return null;
+    }
+    if (data?.id) return String(data.id);
   }
 
   const tmdbId =
     movie.tmdbId ??
     (movie.id.startsWith("tmdb-") ? Number(movie.id.slice(5)) : NaN);
-  if (!Number.isFinite(tmdbId)) return null;
+  if (!Number.isSafeInteger(tmdbId) || tmdbId < 1) return null;
 
-  const poster_path = posterPathFromTmdbPosterUrl(movie.posterImage);
+  const response = await fetch("/api/movies/ensure", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      tmdbId,
+      mediaType: movie.mediaType ?? "movie",
+    }),
+  });
+  if (!response.ok) return null;
+  const data = (await response.json()) as { id?: unknown };
+  return typeof data.id === "string" ? data.id : null;
+}
 
-  const { data, error } = await client
-    .from("movies")
-    .upsert(
-      {
-        tmdb_id: tmdbId,
-        title: movie.title,
-        year: movie.year,
-        genre: movie.genre,
-        director: movie.director,
-        poster_path,
-        poster_class: movie.posterClass,
-      },
-      { onConflict: "tmdb_id" },
-    )
-    .select("id")
-    .single();
-
-  if (error || !data) return null;
-  return data.id as string;
+export function movieTmdbKey(
+  movie: Pick<Movie, "id" | "tmdbId" | "mediaType">,
+): string | null {
+  const tmdbId =
+    movie.tmdbId ??
+    (movie.id.startsWith("tmdb-") ? Number(movie.id.slice(5)) : NaN);
+  if (!Number.isSafeInteger(tmdbId) || tmdbId < 1) return null;
+  return `tmdb-${movie.mediaType ?? "movie"}-${tmdbId}`;
 }
 
 async function itemsForPlaylists(
@@ -269,6 +272,7 @@ export async function addMovieToPlaylistDb(
 
 /** Same title in a playlist row vs detail `Movie` (TMDB / id variants). */
 export function movieMatchesInPlaylistRow(row: Movie, movie: Movie): boolean {
+  if ((row.mediaType ?? "movie") !== (movie.mediaType ?? "movie")) return false;
   if (row.id === movie.id) return true;
   const a = row.tmdbId ?? (row.id.startsWith("tmdb-") ? Number(row.id.slice(5)) : NaN);
   const b = movie.tmdbId ?? (movie.id.startsWith("tmdb-") ? Number(movie.id.slice(5)) : NaN);
@@ -461,15 +465,20 @@ export async function fetchSavedMovieKeys(
 ): Promise<Set<string>> {
   const { data } = await client
     .from("saved_movies")
-    .select("movie_id, movies(tmdb_id)")
+    .select("movie_id, movies(tmdb_id, media_type)")
     .eq("user_id", userId);
 
   const s = new Set<string>();
   for (const r of data ?? []) {
     s.add(r.movie_id as string);
-    const m = r.movies as unknown as { tmdb_id: number | null } | null;
+    const m = r.movies as unknown as {
+      tmdb_id: number | null;
+      media_type: "movie" | "tv" | null;
+    } | null;
     const tid = m?.tmdb_id;
-    if (tid != null) s.add(`tmdb-${tid}`);
+    if (tid != null) {
+      s.add(`tmdb-${m?.media_type === "tv" ? "tv" : "movie"}-${tid}`);
+    }
   }
   return s;
 }

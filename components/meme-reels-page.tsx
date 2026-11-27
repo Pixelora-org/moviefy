@@ -1,38 +1,9 @@
-"use client";
-
-import { useCallback } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { ArrowLeft, Clapperboard, Compass, Film } from "lucide-react";
 import { AppUserButton } from "@/components/app-user-button";
 import { MobileAppNavSheet } from "@/components/mobile-app-nav-sheet";
 import { MemeReelsSection } from "@/components/meme-reels-section";
-import { useSupabaseApp } from "@/components/supabase-app-provider";
-import { prefetchMovieEnrich } from "@/lib/movie-enrich-prefetch";
-import { movieToDetailPageHref } from "@/lib/movie-detail-nav";
-import { pushExploreRecent } from "@/lib/explore-recent-storage";
-import { upsertExploreRecentOpen } from "@/lib/supabase/explore-recent-service";
-import type { Movie } from "@/lib/types";
 export function MemeReelsPage() {
-  const router = useRouter();
-  const { client, dbUserId } = useSupabaseApp();
-
-  const openMovie = useCallback(
-    (movie: Movie) => {
-      pushExploreRecent(movie);
-      if (client && dbUserId) {
-        void upsertExploreRecentOpen(client, dbUserId, movie);
-      }
-      const href = movieToDetailPageHref(movie, "reels");
-      if (!href) return;
-      void (async () => {
-        await prefetchMovieEnrich(movie);
-        router.push(href);
-      })();
-    },
-    [client, router, dbUserId],
-  );
-
   return (
     <div className="min-h-dvh text-foreground">
       <header className="sticky top-0 z-30 border-b border-border/60 bg-card/45 pt-[env(safe-area-inset-top,0px)] backdrop-blur-xl supports-[backdrop-filter]:bg-card/35">
@@ -53,7 +24,7 @@ export function MemeReelsPage() {
               </div>
               <div className="min-w-0">
                 <p className="type-kicker">Meme reels</p>
-                <p className="type-micro truncate">Still on set — opening soon</p>
+                <p className="type-micro truncate">Movie identification is in development</p>
               </div>
             </div>
           </div>
@@ -80,7 +51,7 @@ export function MemeReelsPage() {
       </header>
 
       <main className="mx-auto max-w-[720px] px-3 py-6 pb-[max(2rem,calc(1.25rem+env(safe-area-inset-bottom)))] sm:px-5 sm:py-10">
-        <MemeReelsSection sectionId="reels-page-root" onOpenMovie={openMovie} />
+        <MemeReelsSection sectionId="reels-page-root" />
       </main>
     </div>
   );

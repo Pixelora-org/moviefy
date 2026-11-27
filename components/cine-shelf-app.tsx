@@ -39,6 +39,7 @@ import {
   fetchSavedMoviesForUser,
   fetchUserPlaylists,
   getOrCreatePrimaryWatchedPlaylist,
+  movieTmdbKey,
   movieMatchesInPlaylistRow,
   removeMovieFromPlaylistDb,
   reorderPlaylistMoviesDb,
@@ -461,7 +462,8 @@ export function MoviefyApp() {
           m.id === movie.id ||
           (m.tmdbId != null &&
             m.tmdbId === movie.tmdbId &&
-            movie.tmdbId != null),
+            movie.tmdbId != null &&
+            (m.mediaType ?? "movie") === (movie.mediaType ?? "movie")),
       )
     ) {
       pushToast("Already in this list");
@@ -1359,16 +1361,16 @@ export function MoviefyApp() {
         saved={
           selectedMovie
             ? savedIds.has(selectedMovie.id) ||
-              (selectedMovie.tmdbId != null &&
-                savedIds.has(`tmdb-${selectedMovie.tmdbId}`))
+              (movieTmdbKey(selectedMovie) != null &&
+                savedIds.has(movieTmdbKey(selectedMovie)!))
             : false
         }
         onToggleSave={async () => {
           if (!client || !dbUserId || !selectedMovie) return;
           const was =
             savedIds.has(selectedMovie.id) ||
-            (selectedMovie.tmdbId != null &&
-              savedIds.has(`tmdb-${selectedMovie.tmdbId}`));
+            (movieTmdbKey(selectedMovie) != null &&
+              savedIds.has(movieTmdbKey(selectedMovie)!));
           const ok = await setMovieSavedDb(
             client,
             dbUserId,

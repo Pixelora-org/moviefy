@@ -1,5 +1,5 @@
 -- Moviefy — run this in Supabase SQL Editor (Dashboard → SQL → New query).
--- After: Authentication → Providers → enable "Anonymous" sign-ins.
+-- For Clerk auth, follow the database and JWT setup instructions in README.md.
 
 -- ---------------------------------------------------------------------------
 -- Tables
@@ -14,7 +14,8 @@ create table if not exists public.profiles (
 
 create table if not exists public.movies (
   id uuid primary key default gen_random_uuid(),
-  tmdb_id integer unique,
+  tmdb_id integer,
+  media_type text not null default 'movie' check (media_type in ('movie', 'tv')),
   title text not null,
   year integer not null default 0,
   genre text not null default 'Drama',
@@ -22,12 +23,21 @@ create table if not exists public.movies (
   poster_path text,
   poster_class text not null default 'from-zinc-700 to-zinc-900',
   created_at timestamptz default now(),
+  constraint movies_tmdb_id_media_type_key unique (tmdb_id, media_type),
   constraint movies_genre_check check (
     genre in (
       'Sci-Fi', 'Drama', 'Thriller', 'Comedy', 'Horror',
       'Animation', 'Action', 'Romance'
     )
   )
+);
+
+create table if not exists public.api_rate_limit_counters (
+  user_id text not null,
+  bucket text not null check (bucket in ('pick_for_me', 'movie_catalog')),
+  window_start timestamptz not null,
+  request_count integer not null check (request_count > 0),
+  primary key (user_id, bucket)
 );
 
 create table if not exists public.playlists (
@@ -77,6 +87,63 @@ create index if not exists playlists_public_idx on public.playlists (is_public) 
 create index if not exists playlist_items_playlist_idx on public.playlist_items (playlist_id);
 create index if not exists playlist_likes_playlist_idx on public.playlist_likes (playlist_id);
 create index if not exists saved_movies_user_idx on public.saved_movies (user_id);
+
+create or replace function public.consume_api_rate_limit(p_bucket text)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user_id text := auth.jwt()->>'sub';
+  v_now timestamptz := clock_timestamp();
+  v_window_start timestamptz;
+  v_actual_window_start timestamptz;
+  v_request_count integer;
+  v_max_requests integer;
+begin
+  if v_user_id is null or p_bucket not in ('pick_for_me', 'movie_catalog') then
+    return false;
+  end if;
+
+  v_max_requests := case p_bucket
+    when 'pick_for_me' then 10
+    else 30
+  end;
+  v_window_start := to_timestamp(floor(extract(epoch from v_now) / 60) * 60);
+
+  insert into public.api_rate_limit_counters (
+    user_id,
+    bucket,
+    window_start,
+    request_count
+  )
+  values (v_user_id, p_bucket, v_window_start, 1)
+  on conflict (user_id, bucket) do update
+  set
+    window_start = case
+      when public.api_rate_limit_counters.window_start < excluded.window_start
+        then excluded.window_start
+      else public.api_rate_limit_counters.window_start
+    end,
+    request_count = case
+      when public.api_rate_limit_counters.window_start < excluded.window_start
+        then 1
+      when public.api_rate_limit_counters.window_start = excluded.window_start
+        then public.api_rate_limit_counters.request_count + 1
+      else public.api_rate_limit_counters.request_count
+    end
+  returning window_start, request_count
+    into v_actual_window_start, v_request_count;
+
+  return v_actual_window_start = v_window_start
+    and v_request_count <= v_max_requests;
+end;
+$$;
+
+revoke all on function public.consume_api_rate_limit(text) from public;
+revoke all on function public.consume_api_rate_limit(text) from anon;
+grant execute on function public.consume_api_rate_limit(text) to authenticated;
 
 -- Release radar bookmarks (“Coming up” in Your theatre)
 create table if not exists public.user_release_watchlist (
@@ -252,6 +319,7 @@ alter table public.explore_recent_opens enable row level security;
 alter table public.movie_user_takes enable row level security;
 alter table public.playlist_follows enable row level security;
 alter table public.playlist_likes enable row level security;
+alter table public.api_rate_limit_counters enable row level security;
 
 -- Profiles: readable for explore; users manage their own row
 drop policy if exists "profiles_select_all" on public.profiles;
@@ -268,10 +336,10 @@ drop policy if exists "movies_select_authed" on public.movies;
 create policy "movies_select_authed" on public.movies for select to authenticated using (true);
 
 drop policy if exists "movies_insert_authed" on public.movies;
-create policy "movies_insert_authed" on public.movies for insert to authenticated with check (true);
-
 drop policy if exists "movies_update_authed" on public.movies;
-create policy "movies_update_authed" on public.movies for update to authenticated using (true);
+revoke insert, update on public.movies from anon, authenticated;
+
+revoke all on public.api_rate_limit_counters from public, anon, authenticated;
 
 -- Playlists
 drop policy if exists "playlists_select_visible" on public.playlists;

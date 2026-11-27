@@ -60,5 +60,6 @@ export function movieFromTmdbDiscoverItem(
       : "",
     director: "—",
     tmdbId: item.id,
+    mediaType: "movie",
   };
 }
