@@ -18,6 +18,7 @@ export function scheduleItemToMovie(item: ScheduleItem): Movie {
     posterImage,
     director: "—",
     tmdbId: item.tmdbId,
+    mediaType: item.mediaType,
   };
 }
 

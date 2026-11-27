@@ -10,6 +10,7 @@ type MovieRow = {
   director: string;
   poster_path: string | null;
   poster_class: string;
+  media_type?: "movie" | "tv" | null;
 };
 
 function normalizeGenre(g: string): Genre {
@@ -26,6 +27,7 @@ export function movieRowToMovie(row: MovieRow): Movie {
     posterImage: row.poster_path ? tmdbPosterUrl(row.poster_path, "w342") : "",
     director: row.director || "—",
     tmdbId: row.tmdb_id ?? undefined,
+    mediaType: row.media_type === "tv" ? "tv" : "movie",
   };
 }
 

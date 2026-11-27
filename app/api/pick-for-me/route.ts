@@ -1,9 +1,13 @@
+import { auth } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
 import type { TmdbDiscoverItem } from "@/lib/movie-enrich-types";
 import { movieFromTmdbDiscoverItem } from "@/lib/tmdb-genre-map";
 import { tmdbGenreIdFor } from "@/lib/tmdb-genre-ids";
 import type { Genre } from "@/lib/types";
 import { GENRES } from "@/lib/types";
+import { isClerkAuthActive } from "@/lib/clerk/auth-mode";
+import { readLimitedJson } from "@/lib/http/read-limited-json";
+import { consumeApiRateLimit } from "@/lib/supabase/api-rate-limit";
 import {
   eraToReleaseRange,
   isGenre,
@@ -152,7 +156,7 @@ function keywordFallbackHints(prompt: string): AiHints {
 /** Google AI Studio / Gemini API — key as `GEMINI_API_KEY`. */
 async function interpretPromptWithGemini(
   body: PickForMeRequest,
-  maxRetries: number = 3,
+  maxRetries: number = 1,
 ): Promise<InterpretationResult> {
   const key = process.env.GEMINI_API_KEY?.trim();
   const prompt = body.prompt?.trim() ?? "";
@@ -161,7 +165,6 @@ async function interpretPromptWithGemini(
   const model = safeGeminiModelId(process.env.GEMINI_PICK_MODEL);
   const uiGenres = body.genres.length ? body.genres.join(", ") : "none";
   const uiLang = body.language.trim() || "any (no filter)";
-  const uiEra = body.era;
   const system = `You help TMDB movie discover. Output JSON only (no markdown).
 
 Allowed genre names (exact spelling): ${GENRES.join(", ")}.
@@ -188,6 +191,7 @@ ${prompt.slice(0, 800)}`;
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(10_000),
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: system }] },
           contents: [
@@ -386,12 +390,50 @@ async function fetchDiscoverPage(
 }
 
 export async function POST(request: NextRequest) {
-  let body: PickForMeRequest;
-  try {
-    body = (await request.json()) as PickForMeRequest;
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  if (!isClerkAuthActive()) {
+    return NextResponse.json(
+      { error: "Authentication is not configured for this service." },
+      { status: 503 },
+    );
   }
+
+  const { userId, getToken } = await auth();
+  if (!userId) {
+    return NextResponse.json({ error: "Sign in required." }, { status: 401 });
+  }
+
+  const token = await getToken({ template: "supabase" });
+  if (!token) {
+    return NextResponse.json(
+      { error: "Supabase authentication is not configured." },
+      { status: 503 },
+    );
+  }
+  const allowed = await consumeApiRateLimit(token, "pick_for_me");
+  if (allowed === null) {
+    return NextResponse.json(
+      { error: "Could not verify request limits." },
+      { status: 503 },
+    );
+  }
+  if (!allowed) {
+    return NextResponse.json(
+      { error: "Too many picks. Try again in a minute." },
+      { status: 429, headers: { "Retry-After": "60" } },
+    );
+  }
+
+  const parsed = await readLimitedJson(request, 4096);
+  if (!parsed.ok) {
+    return NextResponse.json(
+      { error: parsed.reason === "too_large" ? "Request too large." : "Invalid JSON." },
+      { status: parsed.reason === "too_large" ? 413 : 400 },
+    );
+  }
+  if (!parsed.value || typeof parsed.value !== "object" || Array.isArray(parsed.value)) {
+    return NextResponse.json({ error: "Invalid request." }, { status: 400 });
+  }
+  const body = parsed.value as PickForMeRequest;
 
   const genres = Array.isArray(body.genres)
     ? body.genres.filter((g): g is Genre => isGenre(String(g)))

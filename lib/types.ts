@@ -23,6 +23,7 @@ export interface Movie {
   director: string;
   /** TMDB id for streaming / discover APIs */
   tmdbId?: number;
+  mediaType?: "movie" | "tv";
 }
 
 export interface PlaylistMovie extends Movie {

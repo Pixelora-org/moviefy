@@ -26,7 +26,7 @@ export function movieToDetailPageHref(
   const pp = posterPathFromTmdbPosterUrl(movie.posterImage);
   if (pp) q.set("pp", pp);
   if (from) q.set("from", from);
-  if (media === "tv") q.set("media", "tv");
+  if ((media ?? movie.mediaType) === "tv") q.set("media", "tv");
   return `/app/movie/${tid}?${q.toString()}`;
 }
 
@@ -54,5 +54,6 @@ export function movieFromDetailPageParams(
     posterImage,
     director,
     tmdbId,
+    mediaType: sp.get("media") === "tv" ? "tv" : "movie",
   };
 }

@@ -23,7 +23,7 @@ const LANDING_NEXT = "/app/explore";
 const landingSignInHref = `/sign-in?redirect_url=${encodeURIComponent(LANDING_NEXT)}`;
 const landingSignUpHref = `/sign-up?redirect_url=${encodeURIComponent(LANDING_NEXT)}`;
 const POSITIONING_STATEMENT =
-  "Moviefy helps you find the perfect movie in seconds — no endless scrolling.";
+  "Browse movies, explore a mood, and keep the picks you want to watch.";
 
 function PosterTile({
   movie,
@@ -148,18 +148,16 @@ export default async function Home() {
           <div className="relative grid gap-12 px-6 py-14 sm:px-10 sm:py-16 lg:grid-cols-[1.05fr_0.95fr] lg:items-center lg:gap-8 lg:py-20">
             <div className="max-w-xl lg:max-w-none">
               <p className="inline-flex rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-primary/90">
-                Stop scrolling. Get the perfect movie in 30 seconds.
+                Movie discovery, without endless scrolling.
               </p>
               <h1 className="mt-4 font-heading text-[2.35rem] font-semibold leading-[1.08] tracking-tight sm:text-5xl lg:text-[3.25rem] xl:text-[3.5rem]">
-                Find your next movie
+                Find a movie
                 <br />
-                in <span className="landing-text-shimmer">30 seconds</span>
+                for <span className="landing-text-shimmer">your mood</span>
               </h1>
               <p className="mt-5 max-w-lg text-base leading-relaxed text-zinc-400 sm:text-lg">
-                Moviefy learns your taste better than Netflix. {POSITIONING_STATEMENT}
-              </p>
-              <p className="mt-2 max-w-lg text-sm font-medium text-zinc-300">
-                Daily recommendation powered by your taste profile.
+                {POSITIONING_STATEMENT} Pick for me turns a prompt into movie suggestions;
+                it doesn&apos;t learn a taste profile or send daily recommendations.
               </p>
               <div className="mt-8 flex flex-wrap gap-3">
                 <Link
@@ -177,7 +175,7 @@ export default async function Home() {
                   className={cn(buttonVariants({ size: "lg", variant: "outline" }), "h-12 border-white/15 bg-white/5")}
                 >
                   <Compass className="size-4" />
-                  Your taste profile
+                  Explore movies
                 </Link>
               </div>
             </div>
@@ -280,7 +278,7 @@ export default async function Home() {
           <div className="mb-10 text-center sm:text-left">
             <h2 className="font-heading text-3xl font-semibold sm:text-4xl">No more endless scrolling</h2>
             <p className="mt-2 max-w-2xl text-zinc-400">
-              A simple flow that learns what you like and gives you a high-confidence pick fast.
+              Explore available titles, find options for a mood, and save what you want to watch.
             </p>
           </div>
           <div className="relative overflow-hidden rounded-[2rem] border border-white/[0.08] bg-zinc-950/45 px-5 py-6 sm:px-8 sm:py-8">
@@ -308,23 +306,23 @@ export default async function Home() {
             <div className="relative grid gap-5 md:grid-cols-3">
               <article className="rounded-2xl border border-white/10 bg-black/35 p-5 backdrop-blur-sm">
                 <Compass className="size-9 rounded-lg bg-sky-500/15 p-2 text-sky-400" />
-                <h3 className="mt-4 font-heading text-xl font-semibold">1. Tell us your taste</h3>
+                <h3 className="mt-4 font-heading text-xl font-semibold">1. Pick a mood or prompt</h3>
                 <p className="mt-2 text-sm text-zinc-300">
-                  Build your taste profile from genres, mood, era, and what you already love.
+                  Choose genres and filters, or describe the kind of movie you are looking for.
                 </p>
               </article>
               <article className="rounded-2xl border border-white/10 bg-black/35 p-5 backdrop-blur-sm">
                 <Zap className="size-9 rounded-lg bg-amber-500/15 p-2 text-amber-400" />
-                <h3 className="mt-4 font-heading text-xl font-semibold">2. Get a daily recommendation</h3>
+                <h3 className="mt-4 font-heading text-xl font-semibold">2. Explore suggestions</h3>
                 <p className="mt-2 text-sm text-zinc-300">
-                  Moviefy narrows options fast and serves one high-confidence pick in seconds.
+                  Pick for me interprets your prompt and finds matching movies to browse.
                 </p>
               </article>
               <article className="rounded-2xl border border-white/10 bg-black/35 p-5 backdrop-blur-sm">
                 <ListMusic className="size-9 rounded-lg bg-primary/15 p-2 text-primary" />
                 <h3 className="mt-4 font-heading text-xl font-semibold">3. Save your winners</h3>
                 <p className="mt-2 text-sm text-zinc-300">
-                  Keep your best picks in playlists and improve recommendations every day.
+                  Save movies to your theatre and organize them in playlists.
                 </p>
               </article>
             </div>
@@ -375,7 +373,7 @@ export default async function Home() {
           <div className="pointer-events-none absolute -left-20 top-1/2 h-64 w-64 -translate-y-1/2 rounded-full bg-primary/20 blur-3xl" />
           <div className="pointer-events-none absolute -right-20 bottom-0 h-48 w-48 rounded-full bg-fuchsia-500/15 blur-3xl" />
           <h2 className="relative font-heading text-3xl font-semibold sm:text-4xl md:text-5xl">
-            Find the perfect movie in seconds.
+            Find a movie for your mood.
             <br />
             <span className="text-primary">No endless scrolling.</span>
           </h2>
@@ -394,7 +392,7 @@ export default async function Home() {
               href={landingSignInHref}
               className={cn(buttonVariants({ size: "lg", variant: "outline" }), "h-12 border-white/20 bg-black/20")}
             >
-              Your taste profile
+              Explore movies
             </Link>
           </div>
         </section>

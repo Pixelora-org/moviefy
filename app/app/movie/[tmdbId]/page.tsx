@@ -10,6 +10,7 @@ import {
   fetchSavedMovieKeys,
   fetchUserPlaylists,
   getOrCreatePrimaryWatchedPlaylist,
+  movieTmdbKey,
   movieMatchesInPlaylistRow,
   removeMovieFromPlaylistDb,
   setMovieSavedDb,
@@ -110,7 +111,7 @@ export default function TmdbMoviePage() {
 
   const saved =
     savedIds.has(movie.id) ||
-    (movie.tmdbId != null && savedIds.has(`tmdb-${movie.tmdbId}`));
+    (movieTmdbKey(movie) != null && savedIds.has(movieTmdbKey(movie)!));
 
   async function refreshLibrary() {
     if (!client || !dbUserId) return;
