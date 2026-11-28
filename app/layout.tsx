@@ -1,33 +1,33 @@
 import type { Metadata, Viewport } from "next";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
-import { Archivo, Inter, JetBrains_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import { ClerkAppShell } from "@/components/clerk-app-shell";
 import { SupabaseAppProvider } from "@/components/supabase-app-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
 
 /** UI body — neutral, readable. */
-const sans = Inter({
+const sans = localFont({
+  src: "./fonts/inter-latin.woff2",
   variable: "--font-body",
-  subsets: ["latin"],
   display: "swap",
-  weight: ["400", "500", "600", "700", "800"],
+  weight: "400 800",
 });
 
-const mono = JetBrains_Mono({
+const mono = localFont({
+  src: "./fonts/jetbrains-mono-latin.woff2",
   variable: "--font-mono",
-  subsets: ["latin"],
   display: "swap",
-  weight: ["400", "500", "600"],
+  weight: "400 600",
 });
 
 /** Display / titles — bold condensed marquee energy. */
-const heading = Archivo({
+const heading = localFont({
+  src: "./fonts/archivo-latin.woff2",
   variable: "--font-display",
-  subsets: ["latin"],
   display: "swap",
-  weight: ["600", "700", "800", "900"],
+  weight: "600 900",
 });
 
 export const metadata: Metadata = {
@@ -46,6 +46,15 @@ export const viewport: Viewport = {
   ],
 };
 
+const configuredClerkProxyUrl = process.env.NEXT_PUBLIC_CLERK_PROXY_URL?.trim();
+const vercelHostname =
+  process.env.VERCEL_ENV === "production"
+    ? process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL
+    : process.env.VERCEL_URL;
+const clerkProxyUrl =
+  configuredClerkProxyUrl ||
+  (vercelHostname ? `https://${vercelHostname}/__clerk/` : undefined);
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -58,7 +67,7 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className="app-body-skin app-touch-root flex min-h-dvh flex-col text-foreground">
-        <ClerkAppShell>
+        <ClerkAppShell proxyUrl={clerkProxyUrl}>
           <SupabaseAppProvider>
             <TooltipProvider>{children}</TooltipProvider>
           </SupabaseAppProvider>
