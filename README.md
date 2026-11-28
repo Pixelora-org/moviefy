@@ -40,7 +40,7 @@ cp .env.example .env.local
 - For a new database, run `supabase/schema.sql`, then `supabase/migrate-clerk-user-ids.sql`, then `supabase/migrations/20261126_launch_hardening.sql` in the Supabase SQL Editor.
 - For an existing database already migrated to Clerk string IDs, run only `supabase/migrations/20261126_launch_hardening.sql`.
 - Back up production data and review migration SQL before applying it. Apply migrations in a controlled deployment step; do not make application startup run schema changes.
-- Configure a Clerk JWT template named `supabase` and ensure its token subject matches the Clerk user ID used by the RLS policies. The app requests this template for Supabase access.
+- Connect Clerk to Supabase using [Clerk's Supabase setup](https://dashboard.clerk.com/setup/supabase), then add Clerk under the Supabase project's **Authentication → Third-Party Auth** settings. The app passes Clerk's default session token to Supabase, whose Clerk integration verifies it using Clerk's public signing keys. Do not configure a custom Clerk JWT template that signs with the Supabase JWT secret.
 - Set `SUPABASE_SERVICE_ROLE_KEY` only in server-side environments. It is required for catalog writes and must never be exposed to the browser.
 - The Clerk identity migration changes UUID IDs to text but does not map existing Supabase users or their data to Clerk accounts. Plan and verify any required user-data mapping separately before migrating a database with existing users.
 

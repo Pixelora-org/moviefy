@@ -58,9 +58,14 @@ dashboard or with the production smoke test.
 ## 3. Verify Clerk-to-Supabase authentication
 
 - [ ] Confirm the production Clerk instance and its production keys are used.
-- [ ] In Clerk, confirm the JWT template is named `supabase` and that the
-  generated token's `sub` claim is the signed-in Clerk user ID. The Supabase
-  RLS policies and rate-limit function use this claim.
+- [ ] In Clerk, finish [Clerk's Supabase setup](https://dashboard.clerk.com/setup/supabase).
+  In Supabase, add the matching Clerk instance under **Authentication →
+  Third-Party Auth**. The app uses Clerk's default session token so Supabase
+  can verify its signature with Clerk's public keys; it does not use a custom
+  `supabase` JWT template or a shared Supabase JWT secret.
+- [ ] Confirm Clerk session tokens include the `authenticated` role claim
+  required by Supabase's third-party integration. The app's RLS policies use
+  the token's `sub` claim as the Clerk user ID.
 - [ ] Verify the production application's Clerk sign-in/sign-up URLs and
   allowed origins match the active production hostname.
 - [ ] Never paste a JWT or secret into logs, source control, or this checklist.

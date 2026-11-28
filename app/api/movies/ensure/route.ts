@@ -33,7 +33,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Sign in required." }, { status: 401 });
   }
 
-  const token = await getToken({ template: "supabase" });
+  const token = await getToken();
   if (!token) {
     return NextResponse.json(
       { error: "Supabase authentication is not configured." },
