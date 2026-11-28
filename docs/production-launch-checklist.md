@@ -23,6 +23,12 @@ dashboard or with the production smoke test.
   endpoint.
 - [ ] After any environment-variable change, redeploy and confirm the active
   production deployment uses the updated configuration.
+- [ ] For Clerk on `moviefy-gules.vercel.app`, set the Clerk Dashboard
+  **Domains → Frontend API → Set proxy configuration** URL to
+  `https://moviefy-gules.vercel.app/__clerk`, then complete Clerk's proxy
+  validation and production auth smoke test. The app handles `/__clerk`
+  requests through Clerk's built-in Next.js proxy; do not configure DNS for
+  `vercel.app`.
 
 ## 2. Verify Supabase before applying migrations
 

@@ -16,6 +16,7 @@ export function ClerkAppShell({ children }: { children: ReactNode }) {
   return (
     <ClerkProvider
       publishableKey={pk}
+      proxyUrl="/__clerk"
       afterSignOutUrl="/"
       signInUrl="/sign-in"
       signUpUrl="/sign-up"
