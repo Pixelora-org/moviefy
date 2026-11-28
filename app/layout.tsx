@@ -46,6 +46,15 @@ export const viewport: Viewport = {
   ],
 };
 
+const configuredClerkProxyUrl = process.env.NEXT_PUBLIC_CLERK_PROXY_URL?.trim();
+const vercelHostname =
+  process.env.VERCEL_ENV === "production"
+    ? process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL
+    : process.env.VERCEL_URL;
+const clerkProxyUrl =
+  configuredClerkProxyUrl ||
+  (vercelHostname ? `https://${vercelHostname}/__clerk/` : undefined);
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -58,7 +67,7 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className="app-body-skin app-touch-root flex min-h-dvh flex-col text-foreground">
-        <ClerkAppShell>
+        <ClerkAppShell proxyUrl={clerkProxyUrl}>
           <SupabaseAppProvider>
             <TooltipProvider>{children}</TooltipProvider>
           </SupabaseAppProvider>

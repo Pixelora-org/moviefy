@@ -26,9 +26,11 @@ dashboard or with the production smoke test.
 - [ ] For Clerk on `moviefy-gules.vercel.app`, set the Clerk Dashboard
   **Domains → Frontend API → Set proxy configuration** URL to
   `https://moviefy-gules.vercel.app/__clerk`, then complete Clerk's proxy
-  validation and production auth smoke test. The app handles `/__clerk`
-  requests through Clerk's built-in Next.js proxy; do not configure DNS for
-  `vercel.app`.
+  validation and production auth smoke test. The app passes an absolute proxy
+  URL to Clerk during server rendering, using `VERCEL_PROJECT_PRODUCTION_URL`
+  in production and `VERCEL_URL` for previews. `NEXT_PUBLIC_CLERK_PROXY_URL`
+  may override this with an absolute URL. The app handles `/__clerk` requests
+  through Clerk's built-in Next.js proxy; do not configure DNS for `vercel.app`.
 
 ## 2. Verify Supabase before applying migrations
 
