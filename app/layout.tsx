@@ -1,33 +1,33 @@
 import type { Metadata, Viewport } from "next";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
-import { Archivo, Inter, JetBrains_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import { ClerkAppShell } from "@/components/clerk-app-shell";
 import { SupabaseAppProvider } from "@/components/supabase-app-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
 
 /** UI body — neutral, readable. */
-const sans = Inter({
+const sans = localFont({
+  src: "./fonts/inter-latin.woff2",
   variable: "--font-body",
-  subsets: ["latin"],
   display: "swap",
-  weight: ["400", "500", "600", "700", "800"],
+  weight: "400 800",
 });
 
-const mono = JetBrains_Mono({
+const mono = localFont({
+  src: "./fonts/jetbrains-mono-latin.woff2",
   variable: "--font-mono",
-  subsets: ["latin"],
   display: "swap",
-  weight: ["400", "500", "600"],
+  weight: "400 600",
 });
 
 /** Display / titles — bold condensed marquee energy. */
-const heading = Archivo({
+const heading = localFont({
+  src: "./fonts/archivo-latin.woff2",
   variable: "--font-display",
-  subsets: ["latin"],
   display: "swap",
-  weight: ["600", "700", "800", "900"],
+  weight: "600 900",
 });
 
 export const metadata: Metadata = {
